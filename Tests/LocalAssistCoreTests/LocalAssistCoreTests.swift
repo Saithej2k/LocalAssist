@@ -51,7 +51,8 @@ final class LocalAssistCoreTests: XCTestCase {
     }
 
     func testCancellationPropagates() async {
-        XCTAssertTrue(await cancellationPropagates())
+        let didPropagate = await cancellationPropagates()
+        XCTAssertTrue(didPropagate)
     }
 
     func testOfflineExecutionUsesDeterministicFallback() async throws {
