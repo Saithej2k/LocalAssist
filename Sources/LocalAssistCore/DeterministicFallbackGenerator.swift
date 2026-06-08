@@ -47,8 +47,9 @@ public struct DeterministicFallbackGenerator: Sendable {
     }
 
     private func makeKeyPoints(from sentences: [String], clauses: [String], limit: Int) -> [String] {
-        let candidates = (sentences + clauses)
-            .map { $0.cleanedBullet() }
+        let preferredSegments = clauses.count > 1 ? clauses : sentences + clauses
+        let candidates = preferredSegments
+            .map { $0.cleanedBullet().sentenceCapitalized() }
             .filter { !$0.isEmpty }
 
         return Array(OrderedUnique.values(candidates).prefix(limit))
@@ -148,13 +149,18 @@ private enum TaskClassifier {
 
     static func dueHint(in clause: String) -> String? {
         let lowercased = clause.lowercased()
-        let explicitHints = [
-            "today", "tomorrow", "tonight", "this week", "next week",
+        let weekdayHints = [
             "monday", "tuesday", "wednesday", "thursday", "friday",
             "saturday", "sunday"
         ]
+        let explicitHints = [
+            "today", "tomorrow", "tonight", "this week", "next week",
+        ] + weekdayHints
 
         if let hint = explicitHints.first(where: { lowercased.contains($0) }) {
+            if weekdayHints.contains(hint) {
+                return hint.sentenceCapitalized()
+            }
             return hint
         }
 
