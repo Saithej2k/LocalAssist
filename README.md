@@ -17,6 +17,7 @@ The project is built as a Swift Package so the core workflow can be tested from 
 
 ```bash
 swift test
+swift run localassist-selftest
 swift run localassist --text "Review the onboarding doc, send Mira the blockers by Friday, and schedule a design sync next week."
 swift run localassist-bench --iterations 30
 ```
