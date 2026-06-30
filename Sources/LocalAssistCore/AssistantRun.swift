@@ -23,6 +23,10 @@ public struct RunMetrics: Codable, Equatable, Sendable {
     public var source: GenerationSource
     public var suggestionCount: Int
     public var actionDraftCount: Int
+    public var keyPointCount: Int
+    public var inputCharacterCount: Int
+    public var outputByteCount: Int
+    public var fallbackReason: String?
     public var cancelled: Bool
 
     public init(
@@ -32,6 +36,10 @@ public struct RunMetrics: Codable, Equatable, Sendable {
         source: GenerationSource,
         suggestionCount: Int,
         actionDraftCount: Int,
+        keyPointCount: Int = 0,
+        inputCharacterCount: Int = 0,
+        outputByteCount: Int = 0,
+        fallbackReason: String? = nil,
         cancelled: Bool = false
     ) {
         self.startedAt = startedAt
@@ -40,6 +48,10 @@ public struct RunMetrics: Codable, Equatable, Sendable {
         self.source = source
         self.suggestionCount = suggestionCount
         self.actionDraftCount = actionDraftCount
+        self.keyPointCount = keyPointCount
+        self.inputCharacterCount = inputCharacterCount
+        self.outputByteCount = outputByteCount
+        self.fallbackReason = fallbackReason
         self.cancelled = cancelled
     }
 }
@@ -63,7 +75,11 @@ public extension LocalAssistService {
                     durationMilliseconds: duration.milliseconds,
                     source: summary.source,
                     suggestionCount: summary.suggestions.count,
-                    actionDraftCount: summary.actionDrafts.count
+                    actionDraftCount: summary.actionDrafts.count,
+                    keyPointCount: summary.keyPoints.count,
+                    inputCharacterCount: request.sourceText.count,
+                    outputByteCount: (try? SummaryFormatter.jsonData(summary, prettyPrinted: false).count) ?? 0,
+                    fallbackReason: summary.diagnostics.fallbackReason
                 )
             )
         } catch is CancellationError {

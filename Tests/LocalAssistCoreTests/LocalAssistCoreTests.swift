@@ -1,3 +1,4 @@
+import Foundation
 @testable import LocalAssistCore
 
 #if canImport(XCTest)
@@ -84,6 +85,24 @@ final class LocalAssistCoreTests: XCTestCase {
         XCTAssertFalse(actions.isEmpty)
         XCTAssertTrue(actions.contains { $0.state == .readyForConfirmation })
         XCTAssertTrue(actions.allSatisfy { !$0.confirmationMessage.isEmpty })
+    }
+
+    func testMetricDistributionComputesPercentiles() {
+        let distribution = sampleDistribution()
+        XCTAssertEqual(distribution.count, 5)
+        XCTAssertEqual(distribution.minimum, 1)
+        XCTAssertEqual(distribution.maximum, 9)
+        XCTAssertEqual(distribution.p50, 5)
+        XCTAssertEqual(distribution.p95, 9)
+    }
+
+    func testRunHistoryStorePersistsAndAggregates() async throws {
+        let result = try await persistedHistoryResult()
+        XCTAssertEqual(result.count, 3)
+        XCTAssertEqual(result.latestOverview, "Run 4")
+        XCTAssertEqual(result.aggregate.runCount, 3)
+        XCTAssertEqual(result.aggregate.fallbackRuns, 3)
+        XCTAssertEqual(result.aggregate.latencyMilliseconds.p50, 5)
     }
 }
 
@@ -175,6 +194,26 @@ func actionDraftsPrepareForConfirmation() async throws {
     #expect(!actions.isEmpty)
     #expect(actions.contains { $0.state == .readyForConfirmation })
     #expect(actions.allSatisfy { !$0.confirmationMessage.isEmpty })
+}
+
+@Test
+func metricDistributionComputesPercentiles() {
+    let distribution = sampleDistribution()
+    #expect(distribution.count == 5)
+    #expect(distribution.minimum == 1)
+    #expect(distribution.maximum == 9)
+    #expect(distribution.p50 == 5)
+    #expect(distribution.p95 == 9)
+}
+
+@Test
+func runHistoryStorePersistsAndAggregates() async throws {
+    let result = try await persistedHistoryResult()
+    #expect(result.count == 3)
+    #expect(result.latestOverview == "Run 4")
+    #expect(result.aggregate.runCount == 3)
+    #expect(result.aggregate.fallbackRuns == 3)
+    #expect(result.aggregate.latencyMilliseconds.p50 == 5)
 }
 
 private func expectLocalAssistError(_ expected: LocalAssistError, operation: () throws -> Void) {
@@ -327,4 +366,75 @@ private func preparedFallbackActions() async throws -> [PreparedToolAction] {
     }
 
     return prepared
+}
+
+private func sampleDistribution() -> MetricDistribution {
+    MetricDistribution(samples: [1, 3, 5, 7, 9])
+}
+
+private func persistedHistoryResult() async throws -> (
+    count: Int,
+    latestOverview: String,
+    aggregate: AggregateRunMetrics
+) {
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("LocalAssist-\(UUID().uuidString)")
+        .appendingPathComponent("history.json")
+    let store = RunHistoryStore(fileURL: url, limit: 3)
+
+    try await store.append(sampleRun(index: 1, latency: 1))
+    try await store.append(sampleRun(index: 2, latency: 3))
+    try await store.append(sampleRun(index: 3, latency: 5))
+    try await store.append(sampleRun(index: 4, latency: 9))
+
+    let runs = try await store.load()
+    let aggregate = try await store.aggregate()
+    try await store.clear()
+
+    return (
+        count: runs.count,
+        latestOverview: runs.first?.summary.overview ?? "",
+        aggregate: aggregate
+    )
+}
+
+private func sampleRun(index: Int, latency: Double) -> AssistantRun {
+    let suggestion = TaskSuggestion(
+        id: "task-\(index)",
+        title: "Run \(index)",
+        priority: .medium,
+        dueHint: nil,
+        action: .reminder,
+        rationale: "Test run",
+        confidence: 0.8
+    )
+    let draft = ToolActionPlanner().draft(for: suggestion)
+    let summary = StructuredSummary(
+        overview: "Run \(index)",
+        keyPoints: ["Point \(index)"],
+        suggestions: [suggestion],
+        actionDrafts: [draft],
+        source: .deterministicFallback,
+        diagnostics: GenerationDiagnostics(
+            availability: .unavailable(reason: "test"),
+            fallbackReason: "test",
+            repairedMalformedModelOutput: false
+        )
+    )
+    return AssistantRun(
+        request: AssistantRequest(sourceText: "Run \(index)"),
+        summary: summary,
+        metrics: RunMetrics(
+            startedAt: Date(timeIntervalSince1970: Double(index)),
+            finishedAt: Date(timeIntervalSince1970: Double(index) + latency / 1_000),
+            durationMilliseconds: latency,
+            source: .deterministicFallback,
+            suggestionCount: 1,
+            actionDraftCount: 1,
+            keyPointCount: 1,
+            inputCharacterCount: 8,
+            outputByteCount: 64,
+            fallbackReason: "test"
+        )
+    )
 }

@@ -34,6 +34,8 @@ private struct SelfTestSuite {
         await deterministicFallbackIsStable()
         await summarizeWithMetricsCapturesRun()
         await actionDraftsPrepareForConfirmation()
+        metricDistributionComputesPercentiles()
+        await runHistoryStorePersistsAndAggregates()
     }
 
     mutating func malformedInputsThrow() {
@@ -237,6 +239,41 @@ private struct SelfTestSuite {
         }
     }
 
+    mutating func metricDistributionComputesPercentiles() {
+        let distribution = MetricDistribution(samples: [1, 3, 5, 7, 9])
+        expect(distribution.count == 5, "distribution count")
+        expect(distribution.minimum == 1, "distribution minimum")
+        expect(distribution.maximum == 9, "distribution maximum")
+        expect(distribution.p50 == 5, "distribution p50")
+        expect(distribution.p95 == 9, "distribution p95")
+    }
+
+    mutating func runHistoryStorePersistsAndAggregates() async {
+        do {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("LocalAssist-\(UUID().uuidString)")
+                .appendingPathComponent("history.json")
+            let store = RunHistoryStore(fileURL: url, limit: 3)
+
+            try await store.append(sampleRun(index: 1, latency: 1))
+            try await store.append(sampleRun(index: 2, latency: 3))
+            try await store.append(sampleRun(index: 3, latency: 5))
+            try await store.append(sampleRun(index: 4, latency: 9))
+
+            let runs = try await store.load()
+            let aggregate = try await store.aggregate()
+            try await store.clear()
+
+            expect(runs.count == 3, "history limit")
+            expect(runs.first?.summary.overview == "Run 4", "history newest first")
+            expect(aggregate.runCount == 3, "history aggregate count")
+            expect(aggregate.fallbackRuns == 3, "history fallback count")
+            expect(aggregate.latencyMilliseconds.p50 == 5, "history p50")
+        } catch {
+            fail("history store threw \(error)")
+        }
+    }
+
     mutating func expectThrows(
         _ expected: LocalAssistError,
         _ label: String,
@@ -271,6 +308,47 @@ private func measuredFallbackRun() async throws -> AssistantRun {
         AssistantRequest(
             sourceText: "Review the launch checklist and send blockers by Friday.",
             maxSuggestions: 3
+        )
+    )
+}
+
+private func sampleRun(index: Int, latency: Double) -> AssistantRun {
+    let suggestion = TaskSuggestion(
+        id: "task-\(index)",
+        title: "Run \(index)",
+        priority: .medium,
+        dueHint: nil,
+        action: .reminder,
+        rationale: "Test run",
+        confidence: 0.8
+    )
+    let draft = ToolActionPlanner().draft(for: suggestion)
+    let summary = StructuredSummary(
+        overview: "Run \(index)",
+        keyPoints: ["Point \(index)"],
+        suggestions: [suggestion],
+        actionDrafts: [draft],
+        source: .deterministicFallback,
+        diagnostics: GenerationDiagnostics(
+            availability: .unavailable(reason: "test"),
+            fallbackReason: "test",
+            repairedMalformedModelOutput: false
+        )
+    )
+    return AssistantRun(
+        request: AssistantRequest(sourceText: "Run \(index)"),
+        summary: summary,
+        metrics: RunMetrics(
+            startedAt: Date(timeIntervalSince1970: Double(index)),
+            finishedAt: Date(timeIntervalSince1970: Double(index) + latency / 1_000),
+            durationMilliseconds: latency,
+            source: .deterministicFallback,
+            suggestionCount: 1,
+            actionDraftCount: 1,
+            keyPointCount: 1,
+            inputCharacterCount: 8,
+            outputByteCount: 64,
+            fallbackReason: "test"
         )
     )
 }
