@@ -32,6 +32,8 @@ private struct SelfTestSuite {
         await cancellationPropagates()
         await offlineExecutionUsesDeterministicFallback()
         await deterministicFallbackIsStable()
+        await summarizeWithMetricsCapturesRun()
+        await actionDraftsPrepareForConfirmation()
     }
 
     mutating func malformedInputsThrow() {
@@ -204,6 +206,37 @@ private struct SelfTestSuite {
         }
     }
 
+    mutating func summarizeWithMetricsCapturesRun() async {
+        do {
+            let run = try await measuredFallbackRun()
+            expect(run.summary.source == .deterministicFallback, "measured fallback source")
+            expect(run.metrics.source == .deterministicFallback, "metrics source")
+            expect(run.metrics.durationMilliseconds >= 0, "metrics duration")
+            expect(run.metrics.suggestionCount == run.summary.suggestions.count, "metrics suggestion count")
+            expect(run.metrics.actionDraftCount == run.summary.actionDrafts.count, "metrics draft count")
+        } catch {
+            fail("measured run threw \(error)")
+        }
+    }
+
+    mutating func actionDraftsPrepareForConfirmation() async {
+        do {
+            let run = try await measuredFallbackRun()
+            let preparer = DraftOnlyToolActionPreparer()
+            var prepared: [PreparedToolAction] = []
+
+            for draft in run.summary.actionDrafts {
+                prepared.append(try await preparer.prepare(draft))
+            }
+
+            expect(!prepared.isEmpty, "prepared actions are present")
+            expect(prepared.contains { $0.state == .readyForConfirmation }, "prepared actions require confirmation")
+            expect(prepared.allSatisfy { !$0.confirmationMessage.isEmpty }, "prepared action messages")
+        } catch {
+            fail("action preparation threw \(error)")
+        }
+    }
+
     mutating func expectThrows(
         _ expected: LocalAssistError,
         _ label: String,
@@ -230,4 +263,14 @@ private struct SelfTestSuite {
     mutating func fail(_ label: String) {
         failures.append(label)
     }
+}
+
+private func measuredFallbackRun() async throws -> AssistantRun {
+    let service = LocalAssistService()
+    return try await service.summarizeWithMetrics(
+        AssistantRequest(
+            sourceText: "Review the launch checklist and send blockers by Friday.",
+            maxSuggestions: 3
+        )
+    )
 }

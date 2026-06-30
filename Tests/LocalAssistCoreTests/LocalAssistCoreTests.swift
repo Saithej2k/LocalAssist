@@ -69,6 +69,22 @@ final class LocalAssistCoreTests: XCTestCase {
         XCTAssertEqual(summaries.first.suggestions, summaries.second.suggestions)
         XCTAssertEqual(summaries.first.actionDrafts, summaries.second.actionDrafts)
     }
+
+    func testSummarizeWithMetricsCapturesRun() async throws {
+        let run = try await measuredFallbackRun()
+        XCTAssertEqual(run.summary.source, .deterministicFallback)
+        XCTAssertEqual(run.metrics.source, .deterministicFallback)
+        XCTAssertGreaterThanOrEqual(run.metrics.durationMilliseconds, 0)
+        XCTAssertEqual(run.metrics.suggestionCount, run.summary.suggestions.count)
+        XCTAssertEqual(run.metrics.actionDraftCount, run.summary.actionDrafts.count)
+    }
+
+    func testActionDraftsPrepareForConfirmation() async throws {
+        let actions = try await preparedFallbackActions()
+        XCTAssertFalse(actions.isEmpty)
+        XCTAssertTrue(actions.contains { $0.state == .readyForConfirmation })
+        XCTAssertTrue(actions.allSatisfy { !$0.confirmationMessage.isEmpty })
+    }
 }
 
 #else
@@ -141,6 +157,24 @@ func deterministicFallbackIsStable() async throws {
     #expect(summaries.first.keyPoints == summaries.second.keyPoints)
     #expect(summaries.first.suggestions == summaries.second.suggestions)
     #expect(summaries.first.actionDrafts == summaries.second.actionDrafts)
+}
+
+@Test
+func summarizeWithMetricsCapturesRun() async throws {
+    let run = try await measuredFallbackRun()
+    #expect(run.summary.source == .deterministicFallback)
+    #expect(run.metrics.source == .deterministicFallback)
+    #expect(run.metrics.durationMilliseconds >= 0)
+    #expect(run.metrics.suggestionCount == run.summary.suggestions.count)
+    #expect(run.metrics.actionDraftCount == run.summary.actionDrafts.count)
+}
+
+@Test
+func actionDraftsPrepareForConfirmation() async throws {
+    let actions = try await preparedFallbackActions()
+    #expect(!actions.isEmpty)
+    #expect(actions.contains { $0.state == .readyForConfirmation })
+    #expect(actions.allSatisfy { !$0.confirmationMessage.isEmpty })
 }
 
 private func expectLocalAssistError(_ expected: LocalAssistError, operation: () throws -> Void) {
@@ -271,4 +305,26 @@ private func stableFallbackSummaries() async throws -> (first: StructuredSummary
         first: try await service.summarize(request),
         second: try await service.summarize(request)
     )
+}
+
+private func measuredFallbackRun() async throws -> AssistantRun {
+    let service = LocalAssistService()
+    return try await service.summarizeWithMetrics(
+        AssistantRequest(
+            sourceText: "Review the launch checklist and send blockers by Friday.",
+            maxSuggestions: 3
+        )
+    )
+}
+
+private func preparedFallbackActions() async throws -> [PreparedToolAction] {
+    let run = try await measuredFallbackRun()
+    let preparer = DraftOnlyToolActionPreparer()
+    var prepared: [PreparedToolAction] = []
+
+    for draft in run.summary.actionDrafts {
+        prepared.append(try await preparer.prepare(draft))
+    }
+
+    return prepared
 }
