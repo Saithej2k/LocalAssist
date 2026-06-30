@@ -33,3 +33,7 @@ Record:
 | Foundation Models available |  |  |  |  |  |
 | Model unavailable fallback |  |  |  |  |  |
 | Concurrent 20 requests |  |  |  |  |  |
+
+## Latest Local Baseline
+
+See [2026-06-30-baseline.md](performance/2026-06-30-baseline.md).

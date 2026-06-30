@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1290" height="2796" viewBox="0 0 1290 2796">
+  <rect width="1290" height="2796" fill="#F6F7F1"/>
+  
+  <text x="98" y="70" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="28" font-weight="700" fill="#1A2025">9:41</text>
+  <rect x="552" y="30" width="186" height="58" rx="29" fill="#101316"/>
+  <rect x="936" y="64" width="8" height="18" rx="3" fill="#1A2025"/>
+  <rect x="952" y="56" width="8" height="26" rx="3" fill="#1A2025"/>
+  <rect x="968" y="48" width="8" height="34" rx="3" fill="#1A2025"/>
+  <rect x="984" y="40" width="8" height="42" rx="3" fill="#1A2025"/>
+  <path d="M1020 64 C1038 46, 1068 46, 1086 64" fill="none" stroke="#1A2025" stroke-width="5" stroke-linecap="round"/>
+  <path d="M1036 80 C1046 70, 1058 70, 1068 80" fill="none" stroke="#1A2025" stroke-width="5" stroke-linecap="round"/>
+  <rect x="1058" y="45" width="58" height="26" rx="7" fill="none" stroke="#1A2025" stroke-width="3"/>
+  <rect x="1119" y="52" width="5" height="12" rx="2" fill="#1A2025"/>
+  <rect x="1064" y="51" width="45" height="14" rx="4" fill="#1A2025"/>
+  
+    
+  <rect x="990" y="174" width="214" height="58" rx="29" fill="#FFFFFF"/>
+  <text x="1097" y="212" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="25" font-weight="700" fill="#117B49">Ready</text>
+  <text x="86" y="182" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="64" font-weight="800" fill="#1A2025">LocalAssist</text>
+  <text x="86" y="338" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="34" font-weight="500" fill="#67747C">Workspace ready. No network session active.</text>
+    <rect x="86" y="492" width="1118" height="604" rx="26" fill="#FFFFFF" stroke="#D4DBDD" stroke-width="2"/>
+      <text x="120" y="568" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="32" font-weight="800" fill="#1A2025">Source text</text>
+      <text x="1034" y="568" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="24" font-weight="700" fill="#67747C">154 chars</text>
+      <rect x="120" y="600" width="1050" height="256" rx="18" fill="#FBFCFC" stroke="#D4DBDD" stroke-width="2"/>
+      <text x="120" y="632" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="34" font-weight="500" fill="#1A2025">Review the onboarding doc, send Mira the</text>
+<text x="120" y="680" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="34" font-weight="500" fill="#1A2025">blockers by Friday, and schedule a design</text>
+<text x="120" y="728" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="34" font-weight="500" fill="#1A2025">sync next week. Update the launch checklist</text>
+<text x="120" y="776" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="34" font-weight="500" fill="#1A2025">before the beta build ships.</text>
+      <text x="120" y="932" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="29" font-weight="700" fill="#1A2025">Suggestions</text>
+      <text x="1122" y="932" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="30" font-weight="800" fill="#1A2025">5</text>
+      <rect x="120" y="970" width="1050" height="8" rx="4" fill="#EEF3F5"/>
+      <rect x="120" y="970" width="710" height="8" rx="4" fill="#0E60D6"/>
+      <circle cx="830" cy="974" r="24" fill="#FFFFFF" stroke="#0E60D6" stroke-width="8"/>
+      <rect x="120" y="1018" width="368" height="58" rx="29" fill="#EEF3F5"/>
+  <text x="304" y="1056" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="25" font-weight="700" fill="#1A2025">Force offline fallback</text>
+    
+    <rect x="86" y="1140" width="1118" height="92" rx="24" fill="#0E60D6"/>
+    <text x="645" y="1198" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="34" font-weight="800" fill="#FFFFFF">Generate locally</text>
+    <rect x="86" y="1290" width="1118" height="388" rx="26" fill="#FFFFFF" stroke="#D4DBDD" stroke-width="2"/>
+      <text x="120" y="1364" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="32" font-weight="800" fill="#1A2025">Status</text>
+      <text x="120" y="1426" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="31" font-weight="500" fill="#67747C">Foundation Models ready. Offline fallback remains</text>
+<text x="120" y="1468" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="31" font-weight="500" fill="#67747C">available for travel, airplane mode, and restricted</text>
+<text x="120" y="1510" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="31" font-weight="500" fill="#67747C">networks.</text>
+      <rect x="120" y="1546" width="280" height="58" rx="29" fill="#EAF2FF"/>
+  <text x="260" y="1584" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="25" font-weight="700" fill="#0E60D6">On-device first</text>
+      <rect x="424" y="1546" width="320" height="58" rx="29" fill="#EAF8F1"/>
+  <text x="584" y="1584" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="25" font-weight="700" fill="#117B49">No network required</text>
+    
+  
+  <rect x="493" y="2746" width="304" height="12" rx="6" fill="#11161A" opacity="0.9"/>
+</svg>

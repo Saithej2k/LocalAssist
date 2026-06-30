@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1290" height="2796" viewBox="0 0 1290 2796">
+  <rect width="1290" height="2796" fill="#F6F7F1"/>
+  
+  <text x="98" y="70" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="28" font-weight="700" fill="#1A2025">9:41</text>
+  <rect x="552" y="30" width="186" height="58" rx="29" fill="#101316"/>
+  <rect x="936" y="64" width="8" height="18" rx="3" fill="#1A2025"/>
+  <rect x="952" y="56" width="8" height="26" rx="3" fill="#1A2025"/>
+  <rect x="968" y="48" width="8" height="34" rx="3" fill="#1A2025"/>
+  <rect x="984" y="40" width="8" height="42" rx="3" fill="#1A2025"/>
+  <path d="M1020 64 C1038 46, 1068 46, 1086 64" fill="none" stroke="#1A2025" stroke-width="5" stroke-linecap="round"/>
+  <path d="M1036 80 C1046 70, 1058 70, 1068 80" fill="none" stroke="#1A2025" stroke-width="5" stroke-linecap="round"/>
+  <rect x="1058" y="45" width="58" height="26" rx="7" fill="none" stroke="#1A2025" stroke-width="3"/>
+  <rect x="1119" y="52" width="5" height="12" rx="2" fill="#1A2025"/>
+  <rect x="1064" y="51" width="45" height="14" rx="4" fill="#1A2025"/>
+  
+    
+  <rect x="990" y="174" width="214" height="58" rx="29" fill="#FFFFFF"/>
+  <text x="1097" y="212" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="25" font-weight="700" fill="#BE6E10">Offline</text>
+  <text x="86" y="182" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="64" font-weight="800" fill="#1A2025">Structured output</text>
+  <text x="86" y="338" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="34" font-weight="500" fill="#67747C">Predictable JSON becomes typed summaries,</text>
+<text x="86" y="382" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="34" font-weight="500" fill="#67747C">tasks, and action drafts.</text>
+    <rect x="86" y="492" width="1118" height="656" rx="26" fill="#FFFFFF" stroke="#D4DBDD" stroke-width="2"/>
+      <text x="120" y="548" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="30" font-weight="800" fill="#67747C">Summary</text>
+      <text x="120" y="610" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="40" font-weight="750" fill="#1A2025">Review onboarding, send Mira launch</text>
+<text x="120" y="664" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="40" font-weight="750" fill="#1A2025">blockers, schedule design sync, and update</text>
+<text x="120" y="718" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="40" font-weight="750" fill="#1A2025">the checklist before beta.</text>
+      <circle cx="140" cy="810" r="16" fill="#117B49"/>
+    <path d="M132 810 l7 8 l14 -18" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="174" y="820" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="31" font-weight="600" fill="#1A2025">Review the onboarding doc</text>
+<circle cx="140" cy="886" r="16" fill="#117B49"/>
+    <path d="M132 886 l7 8 l14 -18" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="174" y="896" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="31" font-weight="600" fill="#1A2025">Send Mira the blockers by Friday</text>
+<circle cx="140" cy="962" r="16" fill="#117B49"/>
+    <path d="M132 962 l7 8 l14 -18" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="174" y="972" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="31" font-weight="600" fill="#1A2025">Schedule a design sync next week</text>
+<circle cx="140" cy="1038" r="16" fill="#117B49"/>
+    <path d="M132 1038 l7 8 l14 -18" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="174" y="1048" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="31" font-weight="600" fill="#1A2025">Update the launch checklist</text>
+    
+    <rect x="86" y="1200" width="1118" height="640" rx="26" fill="#FFFFFF" stroke="#D4DBDD" stroke-width="2"/>
+      <text x="120" y="1254" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="30" font-weight="800" fill="#67747C">Suggested tasks</text>
+      <rect x="120" y="1310" width="1050" height="136" rx="18" fill="#EEF3F5"/>
+    <circle cx="156" cy="1360" r="12" fill="#117B49"/>
+    <text x="188" y="1364" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="31" font-weight="800" fill="#1A2025">Review the onboarding doc</text>
+    <text x="188" y="1412" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="25" font-weight="700" fill="#67747C">Low · reminder</text>
+<rect x="120" y="1488" width="1050" height="136" rx="18" fill="#EEF3F5"/>
+    <circle cx="156" cy="1538" r="12" fill="#BE2925"/>
+    <text x="188" y="1542" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="31" font-weight="800" fill="#1A2025">Send Mira the blockers by Friday</text>
+    <text x="188" y="1590" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="25" font-weight="700" fill="#67747C">High · messageDraft</text>
+<rect x="120" y="1666" width="1050" height="136" rx="18" fill="#EEF3F5"/>
+    <circle cx="156" cy="1716" r="12" fill="#BE6E10"/>
+    <text x="188" y="1720" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="31" font-weight="800" fill="#1A2025">Schedule a design sync next week</text>
+    <text x="188" y="1768" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="25" font-weight="700" fill="#67747C">Medium · calendarHold</text>
+    
+    <rect x="86" y="1892" width="1118" height="280" rx="26" fill="#FFFFFF" stroke="#D4DBDD" stroke-width="2"/>
+      <text x="120" y="1964" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="32" font-weight="800" fill="#1A2025">Fallback reason</text>
+      <text x="120" y="2028" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="31" font-weight="500" fill="#67747C">No on-device model adapter was configured.</text>
+      <rect x="120" y="2088" width="260" height="58" rx="29" fill="#FFF5E6"/>
+  <text x="250" y="2126" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="25" font-weight="700" fill="#BE6E10">Deterministic</text>
+    
+  
+  <rect x="493" y="2746" width="304" height="12" rx="6" fill="#11161A" opacity="0.9"/>
+</svg>

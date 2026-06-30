@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1290" height="2796" viewBox="0 0 1290 2796">
+  <rect width="1290" height="2796" fill="#F6F7F1"/>
+  
+  <text x="98" y="70" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="28" font-weight="700" fill="#1A2025">9:41</text>
+  <rect x="552" y="30" width="186" height="58" rx="29" fill="#101316"/>
+  <rect x="936" y="64" width="8" height="18" rx="3" fill="#1A2025"/>
+  <rect x="952" y="56" width="8" height="26" rx="3" fill="#1A2025"/>
+  <rect x="968" y="48" width="8" height="34" rx="3" fill="#1A2025"/>
+  <rect x="984" y="40" width="8" height="42" rx="3" fill="#1A2025"/>
+  <path d="M1020 64 C1038 46, 1068 46, 1086 64" fill="none" stroke="#1A2025" stroke-width="5" stroke-linecap="round"/>
+  <path d="M1036 80 C1046 70, 1058 70, 1068 80" fill="none" stroke="#1A2025" stroke-width="5" stroke-linecap="round"/>
+  <rect x="1058" y="45" width="58" height="26" rx="7" fill="none" stroke="#1A2025" stroke-width="3"/>
+  <rect x="1119" y="52" width="5" height="12" rx="2" fill="#1A2025"/>
+  <rect x="1064" y="51" width="45" height="14" rx="4" fill="#1A2025"/>
+  
+    
+  <rect x="990" y="174" width="214" height="58" rx="29" fill="#FFFFFF"/>
+  <text x="1097" y="212" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="25" font-weight="700" fill="#117B49">Ready</text>
+  <text x="86" y="182" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="64" font-weight="800" fill="#1A2025">Confirmation-first</text>
+<text x="86" y="258" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="64" font-weight="800" fill="#1A2025">actions</text>
+  <text x="86" y="338" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="34" font-weight="500" fill="#67747C">Drafts are staged locally so the user approves</text>
+<text x="86" y="382" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="34" font-weight="500" fill="#67747C">every system write.</text>
+    <rect x="86" y="560" width="1118" height="204" rx="24" fill="#FFFFFF" stroke="#D4DBDD" stroke-width="2"/>
+    <rect x="120" y="606" width="82" height="82" rx="20" fill="#EAF2FF"/>
+    <text x="161" y="661" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="34" font-weight="900" fill="#0E60D6">+</text>
+    <text x="236" y="620" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="33" font-weight="800" fill="#1A2025">Create reminder</text>
+    <text x="236" y="656" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="27" font-weight="500" fill="#67747C">A reminder is staged locally and still needs</text>
+<text x="236" y="694" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="27" font-weight="500" fill="#67747C">user confirmation before it writes to Reminders.</text>
+    <text x="1144" y="670" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="34" font-weight="800" fill="#67747C">›</text>
+<rect x="86" y="808" width="1118" height="204" rx="24" fill="#FFFFFF" stroke="#D4DBDD" stroke-width="2"/>
+    <rect x="120" y="854" width="82" height="82" rx="20" fill="#EAF2FF"/>
+    <text x="161" y="909" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="34" font-weight="900" fill="#0E60D6">+</text>
+    <text x="236" y="868" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="33" font-weight="800" fill="#1A2025">Draft follow-up message</text>
+    <text x="236" y="904" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="27" font-weight="500" fill="#67747C">A message draft is staged locally and still</text>
+<text x="236" y="942" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="27" font-weight="500" fill="#67747C">needs user confirmation before it opens a</text>
+<text x="236" y="980" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="27" font-weight="500" fill="#67747C">composer.</text>
+    <text x="1144" y="918" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="34" font-weight="800" fill="#67747C">›</text>
+<rect x="86" y="1056" width="1118" height="204" rx="24" fill="#FFFFFF" stroke="#D4DBDD" stroke-width="2"/>
+    <rect x="120" y="1102" width="82" height="82" rx="20" fill="#EAF2FF"/>
+    <text x="161" y="1157" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="34" font-weight="900" fill="#0E60D6">+</text>
+    <text x="236" y="1116" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="33" font-weight="800" fill="#1A2025">Draft calendar hold</text>
+    <text x="236" y="1152" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="27" font-weight="500" fill="#67747C">A calendar hold is staged locally and still</text>
+<text x="236" y="1190" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="27" font-weight="500" fill="#67747C">needs user confirmation before it writes to</text>
+<text x="236" y="1228" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="27" font-weight="500" fill="#67747C">Calendar.</text>
+    <text x="1144" y="1166" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="34" font-weight="800" fill="#67747C">›</text>
+    <rect x="86" y="1378" width="1118" height="360" rx="26" fill="#FFFFFF" stroke="#D4DBDD" stroke-width="2"/>
+      <text x="120" y="1450" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="34" font-weight="800" fill="#1A2025">Run metrics</text>
+      <rect x="120" y="1500" width="320" height="142" rx="18" fill="#EEF3F5"/>
+      <text x="150" y="1552" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="24" font-weight="800" fill="#67747C">Latency</text>
+      <text x="150" y="1608" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="38" font-weight="900" fill="#1A2025">0.4 ms</text>
+      <rect x="472" y="1500" width="320" height="142" rx="18" fill="#EEF3F5"/>
+      <text x="502" y="1552" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="24" font-weight="800" fill="#67747C">Source</text>
+      <text x="502" y="1608" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="38" font-weight="900" fill="#1A2025">Fallback</text>
+      <rect x="824" y="1500" width="320" height="142" rx="18" fill="#EEF3F5"/>
+      <text x="854" y="1552" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="24" font-weight="800" fill="#67747C">Drafts</text>
+      <text x="854" y="1608" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="38" font-weight="900" fill="#1A2025">3</text>
+    
+    <rect x="86" y="1790" width="1118" height="342" rx="26" fill="#FFFFFF" stroke="#D4DBDD" stroke-width="2"/>
+      <text x="120" y="1862" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="34" font-weight="800" fill="#1A2025">Measured behavior</text>
+      <text x="120" y="1928" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="30" font-weight="500" fill="#67747C">Benchmark coverage records p50, p95, peak memory,</text>
+<text x="120" y="1968" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="30" font-weight="500" fill="#67747C">fallback rate, and cancellation latency for repeatable</text>
+<text x="120" y="2008" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="30" font-weight="500" fill="#67747C">regressions.</text>
+      <rect x="120" y="2046" width="210" height="58" rx="29" fill="#EAF2FF"/>
+  <text x="225" y="2084" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="25" font-weight="700" fill="#0E60D6">p50 / p95</text>
+      <rect x="354" y="2046" width="250" height="58" rx="29" fill="#EAF8F1"/>
+  <text x="479" y="2084" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="25" font-weight="700" fill="#117B49">Cancellation</text>
+      <rect x="628" y="2046" width="248" height="58" rx="29" fill="#FFF5E6"/>
+  <text x="752" y="2084" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="25" font-weight="700" fill="#BE6E10">Peak memory</text>
+    
+  
+  <rect x="493" y="2746" width="304" height="12" rx="6" fill="#11161A" opacity="0.9"/>
+</svg>
