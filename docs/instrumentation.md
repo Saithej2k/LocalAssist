@@ -11,8 +11,13 @@ swift run -c release localassist-bench --iterations 100
 Record:
 
 - p50 latency
+- p75 latency
+- p90 latency
 - p95 latency
+- p99 latency
 - peak resident memory
+- memory delta
+- throughput
 - successful cancellation latency
 - fallback rate
 

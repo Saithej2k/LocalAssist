@@ -16,5 +16,9 @@ jobs:
         run: swift test
       - name: Self test
         run: swift run localassist-selftest
+      - name: Benchmark smoke
+        run: |
+          swift run localassist-bench --iterations 8 --warmup 1 --concurrency 2 --json --output /tmp/localassist-benchmark.json >/tmp/localassist-benchmark.stdout
+          test -s /tmp/localassist-benchmark.json
       - name: Render screenshots
         run: node Tools/Screenshots/render-screenshots.js
