@@ -9,10 +9,12 @@ jobs:
   test:
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Swift version
         run: swift --version
       - name: Test
         run: swift test
       - name: Self test
         run: swift run localassist-selftest
+      - name: Render screenshots
+        run: node Tools/Screenshots/render-screenshots.js

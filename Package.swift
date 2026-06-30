@@ -8,12 +8,14 @@ let developerLibraries = "/Library/Developer/CommandLineTools/Library/Developer/
 let package = Package(
     name: "LocalAssist",
     platforms: [
+        .iOS(.v26),
         .macOS(.v26)
     ],
     products: [
         .library(name: "LocalAssistCore", targets: ["LocalAssistCore"]),
         .library(name: "LocalAssistFoundationModels", targets: ["LocalAssistFoundationModels"]),
         .library(name: "LocalAssistAppIntents", targets: ["LocalAssistAppIntents"]),
+        .library(name: "LocalAssistAppUI", targets: ["LocalAssistAppUI"]),
         .executable(name: "localassist", targets: ["LocalAssistCLI"]),
         .executable(name: "localassist-bench", targets: ["LocalAssistBenchmarks"]),
         .executable(name: "localassist-selftest", targets: ["LocalAssistSelfTests"])
@@ -26,6 +28,13 @@ let package = Package(
         ),
         .target(
             name: "LocalAssistAppIntents",
+            dependencies: [
+                "LocalAssistCore",
+                "LocalAssistFoundationModels"
+            ]
+        ),
+        .target(
+            name: "LocalAssistAppUI",
             dependencies: [
                 "LocalAssistCore",
                 "LocalAssistFoundationModels"
