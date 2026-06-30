@@ -33,6 +33,11 @@ public struct LocalAssistHomeView: View {
                         ActionDraftsView(actions: viewModel.preparedActions)
                         MetricsView(metrics: run.metrics)
                     }
+
+                    if viewModel.aggregateMetrics.runCount > 0 {
+                        AggregateMetricsView(metrics: viewModel.aggregateMetrics)
+                        RunHistoryView(runs: viewModel.history)
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 18)
@@ -44,17 +49,27 @@ public struct LocalAssistHomeView: View {
             #endif
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        viewModel.resetSample()
+                    Menu {
+                        Button {
+                            viewModel.resetSample()
+                        } label: {
+                            Label("Reset sample", systemImage: "arrow.counterclockwise")
+                        }
+                        Button(role: .destructive) {
+                            viewModel.clearHistory()
+                        } label: {
+                            Label("Clear history", systemImage: "trash")
+                        }
                     } label: {
-                        Image(systemName: "arrow.counterclockwise")
+                        Image(systemName: "ellipsis.circle")
                     }
-                    .accessibilityLabel("Reset sample")
+                    .accessibilityLabel("More actions")
                 }
             }
         }
         .task {
             viewModel.refreshAvailability()
+            viewModel.loadHistory()
         }
     }
 }
@@ -269,6 +284,63 @@ private struct MetricsView: View {
                 MetricTile(title: "Latency", value: "\(metrics.durationMilliseconds.formatted(.number.precision(.fractionLength(1)))) ms")
                 MetricTile(title: "Source", value: metrics.source == .foundationModels ? "Model" : "Fallback")
                 MetricTile(title: "Drafts", value: "\(metrics.actionDraftCount)")
+            }
+        }
+        .panel()
+    }
+}
+
+private struct AggregateMetricsView: View {
+    var metrics: AggregateRunMetrics
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: "Performance", symbol: "chart.xyaxis.line")
+            HStack(spacing: 10) {
+                MetricTile(title: "Runs", value: "\(metrics.runCount)")
+                MetricTile(title: "p50", value: "\(metrics.latencyMilliseconds.p50.formatted(.number.precision(.fractionLength(1)))) ms")
+                MetricTile(title: "p95", value: "\(metrics.latencyMilliseconds.p95.formatted(.number.precision(.fractionLength(1)))) ms")
+            }
+            HStack(spacing: 10) {
+                MetricTile(title: "Model", value: "\(metrics.foundationModelRuns)")
+                MetricTile(title: "Fallback", value: "\(metrics.fallbackRuns)")
+                MetricTile(title: "Avg drafts", value: metrics.averageActionDrafts.formatted(.number.precision(.fractionLength(1))))
+            }
+        }
+        .panel()
+    }
+}
+
+private struct RunHistoryView: View {
+    var runs: [AssistantRun]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: "Recent runs", symbol: "clock.arrow.circlepath")
+
+            ForEach(runs.prefix(5), id: \.metrics.startedAt) { run in
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: run.summary.source == .foundationModels ? "bolt.circle.fill" : "wifi.slash")
+                        .foregroundStyle(run.summary.source == .foundationModels ? LocalAssistColors.success : LocalAssistColors.warning)
+                        .frame(width: 28, height: 28)
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(run.summary.overview)
+                            .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                            .lineLimit(2)
+                        Text("\(run.metrics.durationMilliseconds.formatted(.number.precision(.fractionLength(1)))) ms · \(run.metrics.suggestionCount) tasks · \(run.metrics.actionDraftCount) drafts")
+                            .font(.system(.caption, design: .rounded, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .padding(12)
+                .background(Color.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(LocalAssistColors.border)
+                }
             }
         }
         .panel()

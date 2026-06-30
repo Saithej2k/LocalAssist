@@ -10,7 +10,8 @@ This document maps the LocalAssist implementation to the product claims in the p
 | Tool-assisted actions | `ToolActionPlanner` converts suggestions into reminder, calendar, message, and checklist drafts. `DraftOnlyToolActionPreparer` stages actions for explicit confirmation before any system write. |
 | System-level integration | `LocalAssistSummaryIntent` exposes the workflow through App Intents, and `LocalAssistShortcuts` publishes Shortcut phrases. |
 | Async work off the Main Actor | `LocalAssistAppUI` keeps the SwiftUI view model on the Main Actor and routes generation/action preparation through the `LocalAssistWorker` actor. |
-| p50/p95/peak memory/cancellation measurement | `localassist-bench` records latency percentiles, peak resident memory, fallback rate, and cancellation behavior. The 2026-06-30 baseline is in `docs/performance`. |
-| Automated tests | `LocalAssistCoreTests` and `localassist-selftest` cover malformed input, model availability, malformed model output, concurrent requests, cancellation, offline execution, deterministic fallback, run metrics, and action preparation. |
+| p50/p95/peak memory/cancellation measurement | `localassist-bench` records p50, p75, p90, p95, p99, throughput, peak resident memory, memory delta, fallback rate, and cancellation behavior. The 2026-06-30 baseline is in `docs/performance`. |
+| Private run history | `RunHistoryStore` persists local run history as JSON, enforces a retention limit, and computes aggregate p50/p95/source/draft metrics for the app. |
+| Automated tests | `LocalAssistCoreTests` and `localassist-selftest` cover malformed input, model availability, malformed model output, concurrent requests, cancellation, offline execution, deterministic fallback, run metrics, action preparation, metric distributions, and history persistence. |
 | iOS app surface | `LocalAssistAppUI` contains the SwiftUI app experience and `Apps/iOS/LocalAssist` contains the app entry point and iOS metadata. |
 | iOS screenshots | `Tools/Screenshots/render-screenshots.js` generates the checked-in 1290x2796 PNG screenshots in `docs/screenshots`. |

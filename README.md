@@ -12,15 +12,18 @@ The project is built as a Swift Package so the core workflow, SwiftUI app surfac
 
 ![Action drafts and metrics](docs/screenshots/03-action-drafts-metrics.png)
 
+![Performance history](docs/screenshots/04-history-performance.png)
+
 ## Highlights
 
 - Uses the local Foundation Models framework when it is available on the device.
 - Falls back to a deterministic offline summarizer when the model is unavailable, cancelled, or produces malformed output.
 - Guides output into a strict JSON contract before normalizing the result into typed Swift models.
 - Produces tool-assisted action drafts for reminders, calendar holds, and follow-up messages.
-- Ships a SwiftUI iOS app surface with model availability, offline fallback, cancellation, structured results, action drafts, and run metrics.
+- Persists local run history and computes aggregate p50/p95/source/draft metrics on device.
+- Ships a SwiftUI iOS app surface with model availability, offline fallback, cancellation, structured results, action drafts, run metrics, and history.
 - Includes XCTest coverage for malformed inputs, availability checks, concurrent requests, cancellation, offline execution, and deterministic fallback behavior.
-- Includes a benchmark harness and Instruments workflow notes for p50 latency, p95 latency, peak memory, and cancellation behavior.
+- Includes a benchmark harness and Instruments workflow notes for p50, p75, p90, p95, p99, throughput, peak memory, memory delta, fallback rate, and cancellation behavior.
 
 ## Quick Start
 
@@ -28,13 +31,15 @@ The project is built as a Swift Package so the core workflow, SwiftUI app surfac
 swift test
 swift run localassist-selftest
 swift run localassist --text "Review the onboarding doc, send Mira the blockers by Friday, and schedule a design sync next week."
-swift run localassist-bench --iterations 30
+swift run localassist-bench --iterations 100 --warmup 5 --concurrency 4 --json --output docs/performance/latest.json
 node Tools/Screenshots/render-screenshots.js
 ```
 
 ## Package Layout
 
 - `LocalAssistCore`: validation, guided generation, fallback summarization, tool drafts, and workflow orchestration.
+- `RunHistoryStore`: JSON-backed local persistence for private run history.
+- `MetricDistribution`: shared percentile and aggregate metric calculations.
 - `LocalAssistFoundationModels`: adapter around Apple's on-device `LanguageModelSession`.
 - `LocalAssistAppIntents`: system integration through App Intents.
 - `LocalAssistAppUI`: reusable SwiftUI surface for the iOS app.
@@ -44,7 +49,7 @@ node Tools/Screenshots/render-screenshots.js
 
 ## Apple Readiness
 
-See [docs/apple-readiness.md](docs/apple-readiness.md) for a point-by-point implementation map and [docs/performance/2026-06-30-baseline.md](docs/performance/2026-06-30-baseline.md) for the latest local benchmark.
+See [docs/apple-readiness.md](docs/apple-readiness.md) for a point-by-point implementation map, [docs/performance/2026-06-30-baseline.md](docs/performance/2026-06-30-baseline.md) for the latest local benchmark summary, and [docs/performance/2026-06-30-benchmark.json](docs/performance/2026-06-30-benchmark.json) for machine-readable telemetry.
 
 ## Example
 

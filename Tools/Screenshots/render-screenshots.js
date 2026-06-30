@@ -217,10 +217,56 @@ function actionsScreenshot() {
   `);
 }
 
+function historyScreenshot() {
+  const exportCopy = textBlock(LEFT + 34, 1954, "Benchmarks write sorted JSON for CI, README baselines, and Instruments comparisons.", 30, 500, colors.muted, 54, 40);
+  const rows = [
+    ["Review onboarding, send blockers, schedule design sync.", "0.3 ms · 3 tasks · 3 drafts", colors.amber],
+    ["Prepare release notes and update the launch checklist.", "0.4 ms · 2 tasks · 2 drafts", colors.amber],
+    ["Send Mira the Friday blockers.", "0.5 ms · 1 task · 1 draft", colors.amber]
+  ].map((row, index) => {
+    const y = 1138 + index * 178;
+    return `${rect(LEFT + 34, y, RIGHT - LEFT - 68, 132, colors.white, colors.border, 18)}
+      <circle cx="${LEFT + 76}" cy="${y + 48}" r="14" fill="${row[2]}"/>
+      <text x="${LEFT + 112}" y="${y + 52}" font-family="${FONT}" font-size="30" font-weight="800" fill="${colors.ink}">${escape(row[0])}</text>
+      <text x="${LEFT + 112}" y="${y + 98}" font-family="${FONT}" font-size="24" font-weight="700" fill="${colors.muted}">${escape(row[1])}</text>`;
+  }).join("\n");
+
+  return shell(`
+    ${header("Performance history", "Local runs are saved privately and summarized into aggregate metrics.", "Ready")}
+    ${card(LEFT, 492, RIGHT - LEFT, 426, `
+      <text x="${LEFT + 34}" y="564" font-family="${FONT}" font-size="34" font-weight="800" fill="${colors.ink}">Aggregate metrics</text>
+      ${rect(LEFT + 34, 628, 320, 142, colors.row, null, 18)}
+      <text x="${LEFT + 64}" y="680" font-family="${FONT}" font-size="24" font-weight="800" fill="${colors.muted}">Runs</text>
+      <text x="${LEFT + 64}" y="736" font-family="${FONT}" font-size="38" font-weight="900" fill="${colors.ink}">42</text>
+      ${rect(LEFT + 386, 628, 320, 142, colors.row, null, 18)}
+      <text x="${LEFT + 416}" y="680" font-family="${FONT}" font-size="24" font-weight="800" fill="${colors.muted}">p50</text>
+      <text x="${LEFT + 416}" y="736" font-family="${FONT}" font-size="38" font-weight="900" fill="${colors.ink}">0.3 ms</text>
+      ${rect(LEFT + 738, 628, 320, 142, colors.row, null, 18)}
+      <text x="${LEFT + 768}" y="680" font-family="${FONT}" font-size="24" font-weight="800" fill="${colors.muted}">p95</text>
+      <text x="${LEFT + 768}" y="736" font-family="${FONT}" font-size="38" font-weight="900" fill="${colors.ink}">0.6 ms</text>
+      ${pill(LEFT + 34, 812, "42 fallback", "#FFF5E6", colors.amber, 230)}
+      ${pill(LEFT + 288, 812, "0 model", "#EAF2FF", colors.accent, 180)}
+      ${pill(LEFT + 492, 812, "3.0 avg drafts", "#EAF8F1", colors.green, 260)}
+    `)}
+    ${card(LEFT, 1026, RIGHT - LEFT, 714, `
+      <text x="${LEFT + 34}" y="1098" font-family="${FONT}" font-size="34" font-weight="800" fill="${colors.ink}">Recent runs</text>
+      ${rows}
+    `)}
+    ${card(LEFT, 1816, RIGHT - LEFT, 300, `
+      <text x="${LEFT + 34}" y="1888" font-family="${FONT}" font-size="34" font-weight="800" fill="${colors.ink}">Export-ready telemetry</text>
+      ${exportCopy.svg}
+      ${pill(LEFT + 34, 2046, "JSON", "#EAF2FF", colors.accent, 156)}
+      ${pill(LEFT + 214, 2046, "Throughput", "#EAF8F1", colors.green, 228)}
+      ${pill(LEFT + 466, 2046, "Memory delta", "#FFF5E6", colors.amber, 256)}
+    `)}
+  `);
+}
+
 const screenshots = [
   ["01-assistant-home", inputScreenshot()],
   ["02-structured-summary", summaryScreenshot()],
-  ["03-action-drafts-metrics", actionsScreenshot()]
+  ["03-action-drafts-metrics", actionsScreenshot()],
+  ["04-history-performance", historyScreenshot()]
 ];
 
 for (const [name, svg] of screenshots) {
