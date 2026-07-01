@@ -35,6 +35,12 @@ public struct DraftOnlyToolActionPreparer: ToolActionPreparing {
     public init() {}
 
     public func prepare(_ draft: ToolActionDraft) async throws -> PreparedToolAction {
+        let signposter = LocalAssistInstrumentation.actionSignposter()
+        let state = signposter.beginInterval("Prepare action draft")
+        defer {
+            signposter.endInterval("Prepare action draft", state)
+        }
+
         try Task.checkCancellation()
 
         let message: String

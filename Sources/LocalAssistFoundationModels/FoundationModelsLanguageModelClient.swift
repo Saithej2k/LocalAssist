@@ -1,6 +1,7 @@
 import Foundation
 import FoundationModels
 import LocalAssistCore
+import OSLog
 
 public struct FoundationModelsLanguageModelClient: LanguageModelClient {
     public init() {}
@@ -17,6 +18,12 @@ public struct FoundationModelsLanguageModelClient: LanguageModelClient {
     }
 
     public func generateResponse(for prompt: String) async throws -> String {
+        let signposter = OSSignposter(subsystem: "com.saithej.localassist", category: "FoundationModels")
+        let state = signposter.beginInterval("LanguageModelSession.respond")
+        defer {
+            signposter.endInterval("LanguageModelSession.respond", state)
+        }
+
         try Task.checkCancellation()
         let session = LanguageModelSession()
         let response = try await session.respond(to: prompt)

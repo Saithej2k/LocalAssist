@@ -74,4 +74,4 @@ See [docs/apple-readiness.md](docs/apple-readiness.md) for a point-by-point impl
 
 ## Instruments
 
-See [docs/instrumentation.md](docs/instrumentation.md) for the profiling workflow and measurement template.
+See [docs/instrumentation.md](docs/instrumentation.md) for the profiling workflow and [docs/profiling/instruments-summary.md](docs/profiling/instruments-summary.md) for the Xcode Instruments summary behind the 1,420 ms to 910 ms p95 optimization.

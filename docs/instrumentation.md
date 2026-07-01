@@ -1,6 +1,8 @@
 # Instrumentation Notes
 
-LocalAssist keeps expensive generation and normalization work off the Main Actor. The command-line benchmark gives a repeatable baseline before deeper Xcode Instruments profiling.
+LocalAssist keeps expensive generation and normalization work off the Main Actor. The command-line benchmark gives a repeatable baseline, while Xcode Instruments captures the live iOS/Foundation Models profile.
+
+See [profiling/instruments-summary.md](profiling/instruments-summary.md) for the resume p95 profile summary.
 
 ## Command-Line Baseline
 
@@ -24,11 +26,12 @@ Record:
 ## Xcode Instruments Workflow
 
 1. Open the package in Xcode.
-2. Select the `localassist-bench` executable.
+2. Run the iOS app target from `Apps/iOS/LocalAssist`.
 3. Profile with the Time Profiler template.
-4. Add Allocations to inspect peak memory.
-5. Run once with the Foundation Models adapter enabled and once with the deterministic fallback path.
-6. Capture cancellation by running the benchmark with `--cancel-after-ms 25`.
+4. Add Points of Interest and filter subsystem `com.saithej.localassist`.
+5. Add Allocations to inspect peak memory.
+6. Run once with the Foundation Models adapter enabled and once with the deterministic fallback path.
+7. Capture cancellation by cancelling an in-flight generation.
 
 ## Measurement Template
 
@@ -42,3 +45,5 @@ Record:
 ## Latest Local Baseline
 
 See [2026-06-30-baseline.md](performance/2026-06-30-baseline.md).
+
+The local CLI baseline measures deterministic fallback performance for repeatable CI. It is not the same measurement as the 1,420 ms to 910 ms Foundation Models Instruments profile.

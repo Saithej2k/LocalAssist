@@ -34,6 +34,12 @@ public actor RunHistoryStore {
     }
 
     public func load() throws -> [AssistantRun] {
+        let signposter = LocalAssistInstrumentation.historySignposter()
+        let state = signposter.beginInterval("Load run history")
+        defer {
+            signposter.endInterval("Load run history", state)
+        }
+
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             return []
         }
@@ -60,6 +66,12 @@ public actor RunHistoryStore {
     }
 
     public func save(_ runs: [AssistantRun]) throws {
+        let signposter = LocalAssistInstrumentation.historySignposter()
+        let state = signposter.beginInterval("Save run history")
+        defer {
+            signposter.endInterval("Save run history", state)
+        }
+
         let trimmed = Array(runs.prefix(limit))
         let data = try exportData(trimmed)
         try FileManager.default.createDirectory(
