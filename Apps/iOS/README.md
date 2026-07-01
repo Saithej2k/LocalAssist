@@ -1,13 +1,18 @@
 # LocalAssist iOS App
 
-This folder contains the app entry point and iOS metadata for the LocalAssist phone experience. The reusable SwiftUI surface lives in the Swift package target `LocalAssistAppUI`, which lets CI compile the UI without requiring a checked-in generated Xcode project.
+This folder contains the app entry point and iOS metadata for the LocalAssist phone experience. The reusable SwiftUI surface lives in the Swift package target `LocalAssistAppUI`, and `project.yml` generates the checked-in Xcode project used for simulator builds.
 
 ## Build In Xcode
 
-1. Open `Package.swift` in Xcode 26 or newer.
-2. Create an iOS App target named `LocalAssist`.
-3. Add the package products `LocalAssistAppUI`, `LocalAssistAppIntents`, `LocalAssistFoundationModels`, and `LocalAssistCore`.
-4. Use `Apps/iOS/LocalAssist/LocalAssistApp.swift` as the app entry point and `Apps/iOS/LocalAssist/Info.plist` as the app metadata.
-5. Run on an iPhone 17 or iOS 26 simulator to exercise the Foundation Models path; toggle offline fallback in the app to exercise deterministic execution.
+```bash
+xcodegen generate
+env -u LD -u LDFLAGS DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  xcodebuild -project LocalAssist.xcodeproj \
+  -scheme LocalAssist \
+  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' \
+  CODE_SIGNING_ALLOWED=NO build
+```
 
-The Command Line Tools environment used by this repo can compile the Swift package, but it cannot boot an iOS simulator because full Xcode and `simctl` are not installed.
+Run on an iPhone 17 or iOS 26 simulator to exercise the Foundation Models path. Toggle offline fallback in the app to exercise deterministic execution.
+
+If Homebrew `lld` is exported through `LD`, unset `LD` and `LDFLAGS` for Xcode commands so Xcode uses Apple’s Mach-O linker.

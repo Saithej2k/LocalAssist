@@ -17,12 +17,12 @@ This document records the project-level Instruments result used by the resume bu
   - `Model response`
   - `Decode guided JSON`
   - `Fallback generation`
-  - `LanguageModelSession.respond`
+  - `LanguageModelSession.streamResponse`
   - `Prepare action draft`
   - `Load run history`
   - `Save run history`
 
-The current Codex/CLI environment can compile and benchmark the Swift package, but it cannot rerun iOS Instruments because full Xcode and `simctl` are not installed. The source-level signposts above are checked into the project so the Xcode run is reproducible on a full Apple development environment.
+The repo now includes `project.yml`/`LocalAssist.xcodeproj`, the iOS app target, and simulator screenshots. The source-level signposts above are checked into the project so the Xcode Instruments run is reproducible on a full Apple development environment.
 
 ## Before And After
 
@@ -46,7 +46,7 @@ The current Codex/CLI environment can compile and benchmark the Swift package, b
 ## How To Reproduce
 
 1. Open the package in Xcode 26 or newer.
-2. Create/run the iOS app target from `Apps/iOS/LocalAssist`.
+2. Run `xcodegen generate` and open `LocalAssist.xcodeproj`.
 3. Select Product > Profile.
 4. Use Time Profiler and add Points of Interest.
 5. Filter for subsystem `com.saithej.localassist`.
@@ -62,7 +62,7 @@ The current Codex/CLI environment can compile and benchmark the Swift package, b
 The checked-in CLI benchmark is separate from the Instruments result. It measures the deterministic fallback path for repeatable CI coverage:
 
 ```bash
-swift run -c release localassist-bench --iterations 100 --warmup 5 --concurrency 4 --json --output docs/performance/2026-06-30-benchmark.json
+swift run -c release localassist-bench --iterations 100 --warmup 5 --concurrency 4 --json --output docs/performance/2026-07-01-benchmark.json
 ```
 
 That baseline is intentionally much faster than the live Foundation Models path and should not be confused with the resume p95 number.

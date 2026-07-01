@@ -2,230 +2,270 @@ import Foundation
 @testable import LocalAssistCore
 
 #if canImport(XCTest)
-import XCTest
+    import XCTest
 
-final class LocalAssistCoreTests: XCTestCase {
-    func testMalformedInputsThrow() throws {
-        let validator = RequestValidator(maxCharacters: 20)
+    final class LocalAssistCoreTests: XCTestCase {
+        func testMalformedInputsThrow() throws {
+            let validator = RequestValidator(maxCharacters: 20)
 
-        XCTAssertThrowsError(try validator.validate(AssistantRequest(sourceText: "   "))) { error in
-            XCTAssertEqual(error as? LocalAssistError, .emptyInput)
+            XCTAssertThrowsError(try validator.validate(AssistantRequest(sourceText: "   "))) { error in
+                XCTAssertEqual(error as? LocalAssistError, .emptyInput)
+            }
+            XCTAssertThrowsError(
+                try validator.validate(AssistantRequest(sourceText: String(repeating: "a", count: 21)))
+            ) { error in
+                XCTAssertEqual(error as? LocalAssistError, .inputTooLong(actual: 21, maximum: 20))
+            }
+            XCTAssertThrowsError(
+                try validator.validate(AssistantRequest(sourceText: "Review notes", maxSuggestions: 0))
+            ) { error in
+                XCTAssertEqual(error as? LocalAssistError, .invalidSuggestionLimit(0))
+            }
         }
-        XCTAssertThrowsError(
-            try validator.validate(AssistantRequest(sourceText: String(repeating: "a", count: 21)))
-        ) { error in
-            XCTAssertEqual(error as? LocalAssistError, .inputTooLong(actual: 21, maximum: 20))
+
+        func testUnavailableModelFallsBack() async throws {
+            let summary = try await unavailableModelSummary()
+            XCTAssertEqual(summary.source, .deterministicFallback)
+            XCTAssertEqual(summary.diagnostics.fallbackReason, "device not eligible")
+            XCTAssertEqual(summary.suggestions.first?.action, .reminder)
         }
-        XCTAssertThrowsError(
-            try validator.validate(AssistantRequest(sourceText: "Review notes", maxSuggestions: 0))
-        ) { error in
-            XCTAssertEqual(error as? LocalAssistError, .invalidSuggestionLimit(0))
+
+        func testMalformedModelOutputUsesFallback() async throws {
+            let summary = try await malformedModelSummary()
+            XCTAssertEqual(summary.source, .deterministicFallback)
+            XCTAssertEqual(summary.diagnostics.fallbackReason, "The on-device model returned malformed guided JSON.")
+            XCTAssertEqual(summary.suggestions.first?.action, .messageDraft)
+        }
+
+        func testGuidedModelOutputUsesFoundationSource() async throws {
+            let summary = try await guidedModelSummary()
+            XCTAssertEqual(summary.source, .foundationModels)
+            XCTAssertEqual(summary.suggestions.first?.priority, .high)
+            XCTAssertEqual(summary.actionDrafts.first?.kind, .messageDraft)
+        }
+
+        func testGuidedGenerationDropsSchemaPlaceholderDueHint() async throws {
+            let summary = try await placeholderDueHintSummary()
+            XCTAssertEqual(summary.source, .foundationModels)
+            XCTAssertNil(summary.suggestions.first?.dueHint)
+        }
+
+        func testStreamingUpdatesExposePartialTextAndFinalSummary() async throws {
+            let result = try await streamedSummaryResult()
+            XCTAssertGreaterThanOrEqual(result.partials.count, 2)
+            XCTAssertTrue(result.partials.contains { $0.contains("\"overview\"") })
+            XCTAssertEqual(result.summary?.source, .foundationModels)
+            XCTAssertEqual(result.summary?.suggestions.first?.action, .calendarHold)
+        }
+
+        func testConcurrentRequestsComplete() async throws {
+            let summaries = try await concurrentSummaries()
+            XCTAssertEqual(summaries.count, 20)
+            XCTAssertTrue(summaries.allSatisfy { $0.source == .deterministicFallback })
+            XCTAssertTrue(summaries.allSatisfy { !$0.suggestions.isEmpty })
+        }
+
+        func testCancellationPropagates() async {
+            let didPropagate = await cancellationPropagates()
+            XCTAssertTrue(didPropagate)
+        }
+
+        func testStreamingCancellationPropagates() async {
+            let didPropagate = await streamingCancellationPropagates()
+            XCTAssertTrue(didPropagate)
+        }
+
+        func testOfflineExecutionUsesDeterministicFallback() async throws {
+            let summary = try await offlineSummary()
+            XCTAssertEqual(summary.source, .deterministicFallback)
+            XCTAssertEqual(summary.diagnostics.availability.isAvailable, false)
+            XCTAssertGreaterThanOrEqual(summary.actionDrafts.count, 2)
+        }
+
+        func testDeterministicFallbackIsStable() async throws {
+            let summaries = try await stableFallbackSummaries()
+            XCTAssertEqual(summaries.first.overview, summaries.second.overview)
+            XCTAssertEqual(summaries.first.keyPoints, summaries.second.keyPoints)
+            XCTAssertEqual(summaries.first.suggestions, summaries.second.suggestions)
+            XCTAssertEqual(summaries.first.actionDrafts, summaries.second.actionDrafts)
+        }
+
+        func testSummarizeWithMetricsCapturesRun() async throws {
+            let run = try await measuredFallbackRun()
+            XCTAssertEqual(run.summary.source, .deterministicFallback)
+            XCTAssertEqual(run.metrics.source, .deterministicFallback)
+            XCTAssertGreaterThanOrEqual(run.metrics.durationMilliseconds, 0)
+            XCTAssertEqual(run.metrics.suggestionCount, run.summary.suggestions.count)
+            XCTAssertEqual(run.metrics.actionDraftCount, run.summary.actionDrafts.count)
+        }
+
+        func testActionDraftsPrepareForConfirmation() async throws {
+            let actions = try await preparedFallbackActions()
+            XCTAssertFalse(actions.isEmpty)
+            XCTAssertTrue(actions.contains { $0.state == .readyForConfirmation })
+            XCTAssertTrue(actions.allSatisfy { !$0.confirmationMessage.isEmpty })
+        }
+
+        func testMetricDistributionComputesPercentiles() {
+            let distribution = sampleDistribution()
+            XCTAssertEqual(distribution.count, 5)
+            XCTAssertEqual(distribution.minimum, 1)
+            XCTAssertEqual(distribution.maximum, 9)
+            XCTAssertEqual(distribution.p50, 5)
+            XCTAssertEqual(distribution.p95, 9)
+        }
+
+        func testRunHistoryStorePersistsAndAggregates() async throws {
+            let result = try await persistedHistoryResult()
+            XCTAssertEqual(result.count, 3)
+            XCTAssertEqual(result.latestOverview, "Run 4")
+            XCTAssertEqual(result.aggregate.runCount, 3)
+            XCTAssertEqual(result.aggregate.fallbackRuns, 3)
+            XCTAssertEqual(result.aggregate.latencyMilliseconds.p50, 5)
         }
     }
-
-    func testUnavailableModelFallsBack() async throws {
-        let summary = try await unavailableModelSummary()
-        XCTAssertEqual(summary.source, .deterministicFallback)
-        XCTAssertEqual(summary.diagnostics.fallbackReason, "device not eligible")
-        XCTAssertEqual(summary.suggestions.first?.action, .reminder)
-    }
-
-    func testMalformedModelOutputUsesFallback() async throws {
-        let summary = try await malformedModelSummary()
-        XCTAssertEqual(summary.source, .deterministicFallback)
-        XCTAssertEqual(summary.diagnostics.fallbackReason, "The on-device model returned malformed guided JSON.")
-        XCTAssertEqual(summary.suggestions.first?.action, .messageDraft)
-    }
-
-    func testGuidedModelOutputUsesFoundationSource() async throws {
-        let summary = try await guidedModelSummary()
-        XCTAssertEqual(summary.source, .foundationModels)
-        XCTAssertEqual(summary.suggestions.first?.priority, .high)
-        XCTAssertEqual(summary.actionDrafts.first?.kind, .messageDraft)
-    }
-
-    func testConcurrentRequestsComplete() async throws {
-        let summaries = try await concurrentSummaries()
-        XCTAssertEqual(summaries.count, 20)
-        XCTAssertTrue(summaries.allSatisfy { $0.source == .deterministicFallback })
-        XCTAssertTrue(summaries.allSatisfy { !$0.suggestions.isEmpty })
-    }
-
-    func testCancellationPropagates() async {
-        let didPropagate = await cancellationPropagates()
-        XCTAssertTrue(didPropagate)
-    }
-
-    func testOfflineExecutionUsesDeterministicFallback() async throws {
-        let summary = try await offlineSummary()
-        XCTAssertEqual(summary.source, .deterministicFallback)
-        XCTAssertEqual(summary.diagnostics.availability.isAvailable, false)
-        XCTAssertGreaterThanOrEqual(summary.actionDrafts.count, 2)
-    }
-
-    func testDeterministicFallbackIsStable() async throws {
-        let summaries = try await stableFallbackSummaries()
-        XCTAssertEqual(summaries.first.overview, summaries.second.overview)
-        XCTAssertEqual(summaries.first.keyPoints, summaries.second.keyPoints)
-        XCTAssertEqual(summaries.first.suggestions, summaries.second.suggestions)
-        XCTAssertEqual(summaries.first.actionDrafts, summaries.second.actionDrafts)
-    }
-
-    func testSummarizeWithMetricsCapturesRun() async throws {
-        let run = try await measuredFallbackRun()
-        XCTAssertEqual(run.summary.source, .deterministicFallback)
-        XCTAssertEqual(run.metrics.source, .deterministicFallback)
-        XCTAssertGreaterThanOrEqual(run.metrics.durationMilliseconds, 0)
-        XCTAssertEqual(run.metrics.suggestionCount, run.summary.suggestions.count)
-        XCTAssertEqual(run.metrics.actionDraftCount, run.summary.actionDrafts.count)
-    }
-
-    func testActionDraftsPrepareForConfirmation() async throws {
-        let actions = try await preparedFallbackActions()
-        XCTAssertFalse(actions.isEmpty)
-        XCTAssertTrue(actions.contains { $0.state == .readyForConfirmation })
-        XCTAssertTrue(actions.allSatisfy { !$0.confirmationMessage.isEmpty })
-    }
-
-    func testMetricDistributionComputesPercentiles() {
-        let distribution = sampleDistribution()
-        XCTAssertEqual(distribution.count, 5)
-        XCTAssertEqual(distribution.minimum, 1)
-        XCTAssertEqual(distribution.maximum, 9)
-        XCTAssertEqual(distribution.p50, 5)
-        XCTAssertEqual(distribution.p95, 9)
-    }
-
-    func testRunHistoryStorePersistsAndAggregates() async throws {
-        let result = try await persistedHistoryResult()
-        XCTAssertEqual(result.count, 3)
-        XCTAssertEqual(result.latestOverview, "Run 4")
-        XCTAssertEqual(result.aggregate.runCount, 3)
-        XCTAssertEqual(result.aggregate.fallbackRuns, 3)
-        XCTAssertEqual(result.aggregate.latencyMilliseconds.p50, 5)
-    }
-}
 
 #else
-import Testing
+    import Testing
 
-@Test
-func malformedInputsThrow() throws {
-    let validator = RequestValidator(maxCharacters: 20)
+    @Test
+    func malformedInputsThrow() throws {
+        let validator = RequestValidator(maxCharacters: 20)
 
-    expectLocalAssistError(.emptyInput) {
-        _ = try validator.validate(AssistantRequest(sourceText: "   "))
+        expectLocalAssistError(.emptyInput) {
+            _ = try validator.validate(AssistantRequest(sourceText: "   "))
+        }
+        expectLocalAssistError(.inputTooLong(actual: 21, maximum: 20)) {
+            _ = try validator.validate(AssistantRequest(sourceText: String(repeating: "a", count: 21)))
+        }
+        expectLocalAssistError(.invalidSuggestionLimit(0)) {
+            _ = try validator.validate(AssistantRequest(sourceText: "Review notes", maxSuggestions: 0))
+        }
     }
-    expectLocalAssistError(.inputTooLong(actual: 21, maximum: 20)) {
-        _ = try validator.validate(AssistantRequest(sourceText: String(repeating: "a", count: 21)))
+
+    @Test
+    func unavailableModelFallsBack() async throws {
+        let summary = try await unavailableModelSummary()
+        #expect(summary.source == .deterministicFallback)
+        #expect(summary.diagnostics.fallbackReason == "device not eligible")
+        #expect(summary.suggestions.first?.action == .reminder)
     }
-    expectLocalAssistError(.invalidSuggestionLimit(0)) {
-        _ = try validator.validate(AssistantRequest(sourceText: "Review notes", maxSuggestions: 0))
+
+    @Test
+    func malformedModelOutputUsesFallback() async throws {
+        let summary = try await malformedModelSummary()
+        #expect(summary.source == .deterministicFallback)
+        #expect(summary.diagnostics.fallbackReason == "The on-device model returned malformed guided JSON.")
+        #expect(summary.suggestions.first?.action == .messageDraft)
     }
-}
 
-@Test
-func unavailableModelFallsBack() async throws {
-    let summary = try await unavailableModelSummary()
-    #expect(summary.source == .deterministicFallback)
-    #expect(summary.diagnostics.fallbackReason == "device not eligible")
-    #expect(summary.suggestions.first?.action == .reminder)
-}
-
-@Test
-func malformedModelOutputUsesFallback() async throws {
-    let summary = try await malformedModelSummary()
-    #expect(summary.source == .deterministicFallback)
-    #expect(summary.diagnostics.fallbackReason == "The on-device model returned malformed guided JSON.")
-    #expect(summary.suggestions.first?.action == .messageDraft)
-}
-
-@Test
-func guidedModelOutputUsesFoundationSource() async throws {
-    let summary = try await guidedModelSummary()
-    #expect(summary.source == .foundationModels)
-    #expect(summary.suggestions.first?.priority == .high)
-    #expect(summary.actionDrafts.first?.kind == .messageDraft)
-}
-
-@Test
-func concurrentRequestsComplete() async throws {
-    let summaries = try await concurrentSummaries()
-    #expect(summaries.count == 20)
-    #expect(summaries.allSatisfy { $0.source == .deterministicFallback })
-    #expect(summaries.allSatisfy { !$0.suggestions.isEmpty })
-}
-
-@Test
-func cancellationPropagatesFromModelClient() async {
-    #expect(await cancellationPropagates())
-}
-
-@Test
-func offlineExecutionUsesDeterministicFallback() async throws {
-    let summary = try await offlineSummary()
-    #expect(summary.source == .deterministicFallback)
-    #expect(summary.diagnostics.availability.isAvailable == false)
-    #expect(summary.actionDrafts.count >= 2)
-}
-
-@Test
-func deterministicFallbackIsStable() async throws {
-    let summaries = try await stableFallbackSummaries()
-    #expect(summaries.first.overview == summaries.second.overview)
-    #expect(summaries.first.keyPoints == summaries.second.keyPoints)
-    #expect(summaries.first.suggestions == summaries.second.suggestions)
-    #expect(summaries.first.actionDrafts == summaries.second.actionDrafts)
-}
-
-@Test
-func summarizeWithMetricsCapturesRun() async throws {
-    let run = try await measuredFallbackRun()
-    #expect(run.summary.source == .deterministicFallback)
-    #expect(run.metrics.source == .deterministicFallback)
-    #expect(run.metrics.durationMilliseconds >= 0)
-    #expect(run.metrics.suggestionCount == run.summary.suggestions.count)
-    #expect(run.metrics.actionDraftCount == run.summary.actionDrafts.count)
-}
-
-@Test
-func actionDraftsPrepareForConfirmation() async throws {
-    let actions = try await preparedFallbackActions()
-    #expect(!actions.isEmpty)
-    #expect(actions.contains { $0.state == .readyForConfirmation })
-    #expect(actions.allSatisfy { !$0.confirmationMessage.isEmpty })
-}
-
-@Test
-func metricDistributionComputesPercentiles() {
-    let distribution = sampleDistribution()
-    #expect(distribution.count == 5)
-    #expect(distribution.minimum == 1)
-    #expect(distribution.maximum == 9)
-    #expect(distribution.p50 == 5)
-    #expect(distribution.p95 == 9)
-}
-
-@Test
-func runHistoryStorePersistsAndAggregates() async throws {
-    let result = try await persistedHistoryResult()
-    #expect(result.count == 3)
-    #expect(result.latestOverview == "Run 4")
-    #expect(result.aggregate.runCount == 3)
-    #expect(result.aggregate.fallbackRuns == 3)
-    #expect(result.aggregate.latencyMilliseconds.p50 == 5)
-}
-
-private func expectLocalAssistError(_ expected: LocalAssistError, operation: () throws -> Void) {
-    do {
-        try operation()
-        #expect(Bool(false))
-    } catch let error as LocalAssistError {
-        #expect(error == expected)
-    } catch {
-        #expect(Bool(false))
+    @Test
+    func guidedModelOutputUsesFoundationSource() async throws {
+        let summary = try await guidedModelSummary()
+        #expect(summary.source == .foundationModels)
+        #expect(summary.suggestions.first?.priority == .high)
+        #expect(summary.actionDrafts.first?.kind == .messageDraft)
     }
-}
+
+    @Test
+    func guidedGenerationDropsSchemaPlaceholderDueHint() async throws {
+        let summary = try await placeholderDueHintSummary()
+        #expect(summary.source == .foundationModels)
+        #expect(summary.suggestions.first?.dueHint == nil)
+    }
+
+    @Test
+    func streamingUpdatesExposePartialTextAndFinalSummary() async throws {
+        let result = try await streamedSummaryResult()
+        #expect(result.partials.count >= 2)
+        #expect(result.partials.contains { $0.contains("\"overview\"") })
+        #expect(result.summary?.source == .foundationModels)
+        #expect(result.summary?.suggestions.first?.action == .calendarHold)
+    }
+
+    @Test
+    func concurrentRequestsComplete() async throws {
+        let summaries = try await concurrentSummaries()
+        #expect(summaries.count == 20)
+        #expect(summaries.allSatisfy { $0.source == .deterministicFallback })
+        #expect(summaries.allSatisfy { !$0.suggestions.isEmpty })
+    }
+
+    @Test
+    func cancellationPropagatesFromModelClient() async {
+        #expect(await cancellationPropagates())
+    }
+
+    @Test
+    func streamingCancellationPropagatesFromModelClient() async {
+        #expect(await streamingCancellationPropagates())
+    }
+
+    @Test
+    func offlineExecutionUsesDeterministicFallback() async throws {
+        let summary = try await offlineSummary()
+        #expect(summary.source == .deterministicFallback)
+        #expect(summary.diagnostics.availability.isAvailable == false)
+        #expect(summary.actionDrafts.count >= 2)
+    }
+
+    @Test
+    func deterministicFallbackIsStable() async throws {
+        let summaries = try await stableFallbackSummaries()
+        #expect(summaries.first.overview == summaries.second.overview)
+        #expect(summaries.first.keyPoints == summaries.second.keyPoints)
+        #expect(summaries.first.suggestions == summaries.second.suggestions)
+        #expect(summaries.first.actionDrafts == summaries.second.actionDrafts)
+    }
+
+    @Test
+    func summarizeWithMetricsCapturesRun() async throws {
+        let run = try await measuredFallbackRun()
+        #expect(run.summary.source == .deterministicFallback)
+        #expect(run.metrics.source == .deterministicFallback)
+        #expect(run.metrics.durationMilliseconds >= 0)
+        #expect(run.metrics.suggestionCount == run.summary.suggestions.count)
+        #expect(run.metrics.actionDraftCount == run.summary.actionDrafts.count)
+    }
+
+    @Test
+    func actionDraftsPrepareForConfirmation() async throws {
+        let actions = try await preparedFallbackActions()
+        #expect(!actions.isEmpty)
+        #expect(actions.contains { $0.state == .readyForConfirmation })
+        #expect(actions.allSatisfy { !$0.confirmationMessage.isEmpty })
+    }
+
+    @Test
+    func metricDistributionComputesPercentiles() {
+        let distribution = sampleDistribution()
+        #expect(distribution.count == 5)
+        #expect(distribution.minimum == 1)
+        #expect(distribution.maximum == 9)
+        #expect(distribution.p50 == 5)
+        #expect(distribution.p95 == 9)
+    }
+
+    @Test
+    func runHistoryStorePersistsAndAggregates() async throws {
+        let result = try await persistedHistoryResult()
+        #expect(result.count == 3)
+        #expect(result.latestOverview == "Run 4")
+        #expect(result.aggregate.runCount == 3)
+        #expect(result.aggregate.fallbackRuns == 3)
+        #expect(result.aggregate.latencyMilliseconds.p50 == 5)
+    }
+
+    private func expectLocalAssistError(_ expected: LocalAssistError, operation: () throws -> Void) {
+        do {
+            try operation()
+            #expect(Bool(false))
+        } catch let error as LocalAssistError {
+            #expect(error == expected)
+        } catch {
+            #expect(Bool(false))
+        }
+    }
 #endif
 
 private func unavailableModelSummary() async throws -> StructuredSummary {
@@ -274,11 +314,90 @@ private func guidedModelSummary() async throws -> StructuredSummary {
     )
 }
 
+private func placeholderDueHintSummary() async throws -> StructuredSummary {
+    let response = """
+    {
+      "overview": "Mira needs launch blockers.",
+      "keyPoints": ["Send Mira blockers"],
+      "suggestions": [
+        {
+          "title": "Send Mira blockers",
+          "priority": "high",
+          "dueHint": "Optional natural language deadline",
+          "action": "messageDraft",
+          "rationale": "A direct follow-up message is needed.",
+          "confidence": 0.91
+        }
+      ]
+    }
+    """
+    let model = StaticLanguageModelClient(state: .available, response: response)
+    let service = LocalAssistService(primaryModel: model)
+    return try await service.summarize(
+        AssistantRequest(sourceText: "Send Mira blockers.")
+    )
+}
+
+private func streamedSummaryResult() async throws -> (
+    partials: [String],
+    summary: StructuredSummary?
+) {
+    let response = """
+    {
+      "overview": "A launch sync needs a calendar hold.",
+      "keyPoints": ["Schedule the launch sync", "Share the agenda"],
+      "suggestions": [
+        {
+          "title": "Schedule launch sync",
+          "priority": "medium",
+          "dueHint": "next week",
+          "action": "calendarHold",
+          "rationale": "The team needs time reserved for launch coordination.",
+          "confidence": 0.84
+        }
+      ]
+    }
+    """
+    let chunks = [
+        "{",
+        """
+        {
+          "overview": "A launch sync needs a calendar hold.",
+          "keyPoints": ["Schedule the launch sync"],
+          "suggestions": []
+        }
+        """,
+        response,
+    ]
+    let model = StaticLanguageModelClient(
+        state: .available,
+        response: response,
+        streamChunks: chunks
+    )
+    let service = LocalAssistService(primaryModel: model)
+
+    var partials: [String] = []
+    var summary: StructuredSummary?
+
+    for try await update in service.streamSummary(
+        AssistantRequest(sourceText: "Schedule a launch sync next week and share the agenda.")
+    ) {
+        if update.phase == .streamingModel, !update.partialText.isEmpty {
+            partials.append(update.partialText)
+        }
+        if let final = update.summary {
+            summary = final
+        }
+    }
+
+    return (partials, summary)
+}
+
 private func concurrentSummaries() async throws -> [StructuredSummary] {
     let service = LocalAssistService()
 
     return try await withThrowingTaskGroup(of: StructuredSummary.self) { group in
-        for index in 0..<20 {
+        for index in 0 ..< 20 {
             group.addTask {
                 try await service.summarize(
                     AssistantRequest(
@@ -323,6 +442,45 @@ private func cancellationPropagates() async -> Bool {
     }
 }
 
+private func streamingCancellationPropagates() async -> Bool {
+    let response = """
+    {
+      "overview": "Cancellation should interrupt streaming.",
+      "keyPoints": ["Cancel streaming"],
+      "suggestions": []
+    }
+    """
+    let model = StaticLanguageModelClient(
+        state: .available,
+        response: response,
+        streamChunks: [response],
+        chunkDelayNanoseconds: 2_000_000_000
+    )
+    let service = LocalAssistService(primaryModel: model)
+    let task = Task {
+        var updateCount = 0
+        for try await _ in service.streamSummary(
+            AssistantRequest(sourceText: "Review streaming cancellation tomorrow.")
+        ) {
+            updateCount += 1
+        }
+        try Task.checkCancellation()
+        return updateCount
+    }
+
+    try? await Task.sleep(nanoseconds: 20_000_000)
+    task.cancel()
+
+    do {
+        _ = try await task.value
+        return false
+    } catch is CancellationError {
+        return true
+    } catch {
+        return false
+    }
+}
+
 private func offlineSummary() async throws -> StructuredSummary {
     let service = LocalAssistService()
     return try await service.summarize(
@@ -340,9 +498,9 @@ private func stableFallbackSummaries() async throws -> (first: StructuredSummary
         maxSuggestions: 3
     )
 
-    return (
-        first: try await service.summarize(request),
-        second: try await service.summarize(request)
+    return try (
+        first: await service.summarize(request),
+        second: await service.summarize(request)
     )
 }
 
@@ -362,7 +520,7 @@ private func preparedFallbackActions() async throws -> [PreparedToolAction] {
     var prepared: [PreparedToolAction] = []
 
     for draft in run.summary.actionDrafts {
-        prepared.append(try await preparer.prepare(draft))
+        try prepared.append(await preparer.prepare(draft))
     }
 
     return prepared
@@ -426,7 +584,7 @@ private func sampleRun(index: Int, latency: Double) -> AssistantRun {
         summary: summary,
         metrics: RunMetrics(
             startedAt: Date(timeIntervalSince1970: Double(index)),
-            finishedAt: Date(timeIntervalSince1970: Double(index) + latency / 1_000),
+            finishedAt: Date(timeIntervalSince1970: Double(index) + latency / 1000),
             durationMilliseconds: latency,
             source: .deterministicFallback,
             suggestionCount: 1,

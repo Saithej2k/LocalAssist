@@ -6,7 +6,7 @@ LocalAssist turns local text such as meeting notes or email drafts into a struct
 
 ## How Did You Use Foundation Models?
 
-I isolated Foundation Models behind `LanguageModelClient`. The live adapter checks `SystemLanguageModel.default.availability`, then calls `LanguageModelSession().respond(to:)`. The rest of the app receives typed `StructuredSummary` output and does not depend directly on Foundation Models APIs.
+I isolated Foundation Models behind `LanguageModelClient`. The live adapter checks `SystemLanguageModel.default.availability`, then streams `LanguageModelSession().streamResponse(to:)`. The rest of the app receives typed `StructuredSummary` output and does not depend directly on Foundation Models APIs.
 
 ## What Is Guided Generation?
 
@@ -25,14 +25,16 @@ Each draft is staged by `DraftOnlyToolActionPreparer` and requires user confirma
 
 ## How Did You Handle Streaming And Cancellation?
 
-The current implementation uses async response generation, not token streaming. Cancellation is handled through Swift structured concurrency:
+The app has a stream-first generation path:
 
-- SwiftUI owns a cancellable `Task`.
-- `LocalAssistService`, fallback generation, static test clients, and action preparation call `Task.checkCancellation()`.
-- Cancellation propagates as `CancellationError`.
-- Tests use delayed model clients to verify cancellation paths.
+- `LanguageModelClient.streamResponse(for:)` exposes partial model output as `AsyncThrowingStream<PartialGeneration, Error>`.
+- `FoundationModelsLanguageModelClient` maps `LanguageModelSession.streamResponse(to:)` snapshots into partial text updates.
+- `LocalAssistService.streamSummary(_:)` emits validation, availability, prompt, streaming, decoding, fallback, and completed phases.
+- SwiftUI stores partial text in transient state and only commits `StructuredSummary` after guided JSON validation succeeds.
+- Cancellation is owned by a cancellable SwiftUI `Task`; the service, fallback generation, static test clients, and action preparation call `Task.checkCancellation()`.
+- XCTest covers both delayed final-response cancellation and delayed streaming cancellation.
 
-If streaming were added, I would stream partial text into a transient UI state and only commit a final result after JSON validation succeeds.
+Cancellation propagates as `CancellationError` for the final `summarize(_:)` API. For streaming consumers, the consuming task checks cancellation after stream termination, which prevents a cancelled stream from being mistaken for a completed summary.
 
 ## What Went Wrong With Swift Concurrency Initially?
 
@@ -43,7 +45,7 @@ The first issues were classic Swift 6 strict-concurrency problems:
 - metric initialization captured `self` before all stored properties were initialized
 - too much orchestration initially lived close to the `@MainActor` view model
 
-The final structure keeps UI state on `@MainActor`, routes work through `LocalAssistWorker`, and persists run history through `RunHistoryStore`.
+The final structure keeps UI state on `@MainActor`, routes generation/action work through `LocalAssistWorker`, streams partial updates into transient UI state, and persists run history through `RunHistoryStore`.
 
 ## What Did Instruments Show?
 

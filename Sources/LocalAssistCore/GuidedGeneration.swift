@@ -113,7 +113,7 @@ private extension TaskSuggestion {
 
         let priority = TaskPriority(rawValue: suggestion.priority.lowercased()) ?? .medium
         let action = SuggestedAction(rawValue: suggestion.action) ?? .reminder
-        let dueHint = suggestion.dueHint?.cleanedBullet().nilIfEmpty
+        let dueHint = suggestion.dueHint?.cleanedBullet().withoutSchemaPlaceholder.nilIfEmpty
         let rationale = suggestion.rationale.cleanedBullet()
 
         self.init(
@@ -128,6 +128,22 @@ private extension TaskSuggestion {
     }
 }
 
+private extension String {
+    var withoutSchemaPlaceholder: String {
+        let lowercasedValue = lowercased()
+        let placeholders = [
+            "optional natural language deadline",
+            "optional natural language due date",
+            "optional deadline",
+        ]
+
+        if placeholders.contains(lowercasedValue) {
+            return ""
+        }
+        return self
+    }
+}
+
 private enum JSONExtractor {
     static func objectData(from text: String) -> Data? {
         let characters = Array(text)
@@ -139,7 +155,7 @@ private enum JSONExtractor {
         var inString = false
         var isEscaped = false
 
-        for index in start..<characters.count {
+        for index in start ..< characters.count {
             let character = characters[index]
 
             if inString {
@@ -163,7 +179,7 @@ private enum JSONExtractor {
             } else if character == "}" {
                 depth -= 1
                 if depth == 0 {
-                    let object = String(characters[start...index])
+                    let object = String(characters[start ... index])
                     return object.data(using: .utf8)
                 }
             }

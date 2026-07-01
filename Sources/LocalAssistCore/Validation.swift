@@ -4,15 +4,18 @@ public enum LocalAssistError: Error, Equatable, Sendable, CustomStringConvertibl
     case emptyInput
     case inputTooLong(actual: Int, maximum: Int)
     case invalidSuggestionLimit(Int)
+    case generationDidNotFinish
 
     public var description: String {
         switch self {
         case .emptyInput:
             "Input text is empty."
-        case .inputTooLong(let actual, let maximum):
+        case let .inputTooLong(actual, maximum):
             "Input text is too long (\(actual) characters, maximum \(maximum))."
-        case .invalidSuggestionLimit(let limit):
+        case let .invalidSuggestionLimit(limit):
             "Suggestion limit must be between 1 and 8, received \(limit)."
+        case .generationDidNotFinish:
+            "Generation ended without a validated summary."
         }
     }
 }
@@ -21,7 +24,7 @@ public struct RequestValidator: Sendable {
     public var maxCharacters: Int
     public var suggestionRange: ClosedRange<Int>
 
-    public init(maxCharacters: Int = 12_000, suggestionRange: ClosedRange<Int> = 1...8) {
+    public init(maxCharacters: Int = 12000, suggestionRange: ClosedRange<Int> = 1 ... 8) {
         self.maxCharacters = maxCharacters
         self.suggestionRange = suggestionRange
     }

@@ -3,6 +3,7 @@ import SwiftUI
 
 public struct LocalAssistHomeView: View {
     @StateObject private var viewModel: LocalAssistViewModel
+    @State private var didRunLaunchAutomation = false
 
     public init(viewModel: LocalAssistViewModel = LocalAssistViewModel()) {
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -13,7 +14,6 @@ public struct LocalAssistHomeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     AppHeaderView(availability: viewModel.availability)
-                    InputComposerView(viewModel: viewModel)
 
                     if let errorMessage = viewModel.errorMessage {
                         StatusPanel(
@@ -25,7 +25,11 @@ public struct LocalAssistHomeView: View {
                     }
 
                     if viewModel.isGenerating {
-                        ProgressPanel()
+                        ProgressPanel(
+                            phase: viewModel.generationPhase,
+                            message: viewModel.generationMessage,
+                            partialText: viewModel.streamingPartialText
+                        )
                     }
 
                     if let run = viewModel.run {
@@ -33,6 +37,8 @@ public struct LocalAssistHomeView: View {
                         ActionDraftsView(actions: viewModel.preparedActions)
                         MetricsView(metrics: run.metrics)
                     }
+
+                    InputComposerView(viewModel: viewModel)
 
                     if viewModel.aggregateMetrics.runCount > 0 {
                         AggregateMetricsView(metrics: viewModel.aggregateMetrics)
@@ -45,32 +51,50 @@ public struct LocalAssistHomeView: View {
             .background(LocalAssistColors.canvas)
             .navigationTitle("LocalAssist")
             #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
+                .navigationBarTitleDisplayMode(.inline)
             #endif
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        Button {
-                            viewModel.resetSample()
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Menu {
+                            Button {
+                                viewModel.resetSample()
+                            } label: {
+                                Label("Reset sample", systemImage: "arrow.counterclockwise")
+                            }
+                            Button(role: .destructive) {
+                                viewModel.clearHistory()
+                            } label: {
+                                Label("Clear history", systemImage: "trash")
+                            }
                         } label: {
-                            Label("Reset sample", systemImage: "arrow.counterclockwise")
+                            Image(systemName: "ellipsis.circle")
                         }
-                        Button(role: .destructive) {
-                            viewModel.clearHistory()
-                        } label: {
-                            Label("Clear history", systemImage: "trash")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
+                        .accessibilityLabel("More actions")
                     }
-                    .accessibilityLabel("More actions")
                 }
-            }
         }
         .task {
             viewModel.refreshAvailability()
             viewModel.loadHistory()
+            runLaunchAutomationIfNeeded()
         }
+    }
+
+    private func runLaunchAutomationIfNeeded() {
+        guard !didRunLaunchAutomation else {
+            return
+        }
+
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["LOCALASSIST_AUTO_RUN"] == "1" else {
+            return
+        }
+
+        didRunLaunchAutomation = true
+        if environment["LOCALASSIST_FORCE_OFFLINE"] == "1" {
+            viewModel.forceOfflineFallback = true
+        }
+        viewModel.summarize()
     }
 }
 
@@ -132,7 +156,7 @@ private struct InputComposerView: View {
                     Text("\(Int(viewModel.maxSuggestions.rounded()))")
                         .font(.system(.body, design: .rounded, weight: .semibold))
                 }
-                Slider(value: $viewModel.maxSuggestions, in: 1...8, step: 1)
+                Slider(value: $viewModel.maxSuggestions, in: 1 ... 8, step: 1)
 
                 Toggle(isOn: $viewModel.forceOfflineFallback) {
                     Label("Force offline fallback", systemImage: "wifi.slash")
@@ -204,20 +228,48 @@ private struct SuggestionRow: View {
                 Text(suggestion.title)
                     .font(.system(.headline, design: .rounded))
                     .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 8) {
-                    Text(suggestion.priority.rawValue.capitalized)
+                HStack(spacing: 6) {
+                    MetadataPill(text: suggestion.priority.rawValue.capitalized)
                     if let dueHint = suggestion.dueHint {
-                        Text(dueHint)
+                        MetadataPill(text: dueHint)
                     }
-                    Text(suggestion.action.rawValue)
+                    MetadataPill(text: actionLabel(for: suggestion.action))
                 }
-                .font(.system(.caption, design: .rounded, weight: .semibold))
-                .foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
         }
         .padding(12)
         .background(LocalAssistColors.row, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func actionLabel(for action: SuggestedAction) -> String {
+        switch action {
+        case .reminder:
+            "Reminder"
+        case .calendarHold:
+            "Calendar"
+        case .messageDraft:
+            "Message"
+        case .checklistItem:
+            "Checklist"
+        case .none:
+            "No action"
+        }
+    }
+}
+
+private struct MetadataPill: View {
+    var text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(.caption, design: .rounded, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(Color.white.opacity(0.74), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -417,14 +469,57 @@ private struct PriorityDot: View {
 }
 
 private struct ProgressPanel: View {
+    var phase: SummaryGenerationPhase?
+    var message: String?
+    var partialText: String
+
     var body: some View {
-        HStack(spacing: 12) {
-            ProgressView()
-            Text("Generating locally")
-                .font(.system(.subheadline, design: .rounded, weight: .semibold))
-            Spacer()
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                ProgressView()
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(phaseTitle)
+                        .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                    if let message {
+                        Text(message)
+                            .font(.system(.caption, design: .rounded, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+            }
+
+            if !partialText.isEmpty {
+                Text(partialText)
+                    .font(.system(.caption, design: .monospaced))
+                    .lineLimit(5)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(LocalAssistColors.row, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
         }
         .panel()
+    }
+
+    private var phaseTitle: String {
+        switch phase {
+        case .validating:
+            "Validating"
+        case .checkingAvailability:
+            "Checking model"
+        case .fallback:
+            "Using fallback"
+        case .buildingPrompt:
+            "Preparing prompt"
+        case .streamingModel:
+            "Streaming locally"
+        case .decoding:
+            "Validating output"
+        case .completed:
+            "Finishing"
+        case nil:
+            "Generating locally"
+        }
     }
 }
 

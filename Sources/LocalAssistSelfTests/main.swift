@@ -28,8 +28,10 @@ private struct SelfTestSuite {
         await unavailableModelFallsBack()
         await malformedModelOutputUsesFallback()
         await guidedModelOutputUsesFoundationSource()
+        await streamingUpdatesExposePartialTextAndFinalSummary()
         await concurrentRequestsComplete()
         await cancellationPropagates()
+        await streamingCancellationPropagates()
         await offlineExecutionUsesDeterministicFallback()
         await deterministicFallbackIsStable()
         await summarizeWithMetricsCapturesRun()
@@ -117,11 +119,23 @@ private struct SelfTestSuite {
         }
     }
 
+    mutating func streamingUpdatesExposePartialTextAndFinalSummary() async {
+        do {
+            let result = try await streamedSummaryResult()
+            expect(result.partials.count >= 2, "streaming partial count")
+            expect(result.partials.contains { $0.contains("\"overview\"") }, "streaming partial text")
+            expect(result.summary?.source == .foundationModels, "streaming final source")
+            expect(result.summary?.suggestions.first?.action == .calendarHold, "streaming final action")
+        } catch {
+            fail("streaming model scenario threw \(error)")
+        }
+    }
+
     mutating func concurrentRequestsComplete() async {
         do {
             let service = LocalAssistService()
             let summaries = try await withThrowingTaskGroup(of: StructuredSummary.self) { group in
-                for index in 0..<20 {
+                for index in 0 ..< 20 {
                     group.addTask {
                         try await service.summarize(
                             AssistantRequest(
@@ -170,6 +184,45 @@ private struct SelfTestSuite {
             pass()
         } catch {
             fail("expected CancellationError, received \(error)")
+        }
+    }
+
+    mutating func streamingCancellationPropagates() async {
+        let response = """
+        {
+          "overview": "Cancellation should interrupt streaming.",
+          "keyPoints": ["Cancel streaming"],
+          "suggestions": []
+        }
+        """
+        let model = StaticLanguageModelClient(
+            state: .available,
+            response: response,
+            streamChunks: [response],
+            chunkDelayNanoseconds: 2_000_000_000
+        )
+        let service = LocalAssistService(primaryModel: model)
+        let task = Task {
+            var updateCount = 0
+            for try await _ in service.streamSummary(
+                AssistantRequest(sourceText: "Review streaming cancellation tomorrow.")
+            ) {
+                updateCount += 1
+            }
+            try Task.checkCancellation()
+            return updateCount
+        }
+
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            fail("streaming cancellation did not propagate")
+        } catch is CancellationError {
+            pass()
+        } catch {
+            fail("expected streaming CancellationError, received \(error)")
         }
     }
 
@@ -228,7 +281,7 @@ private struct SelfTestSuite {
             var prepared: [PreparedToolAction] = []
 
             for draft in run.summary.actionDrafts {
-                prepared.append(try await preparer.prepare(draft))
+                try prepared.append(await preparer.prepare(draft))
             }
 
             expect(!prepared.isEmpty, "prepared actions are present")
@@ -312,6 +365,61 @@ private func measuredFallbackRun() async throws -> AssistantRun {
     )
 }
 
+private func streamedSummaryResult() async throws -> (
+    partials: [String],
+    summary: StructuredSummary?
+) {
+    let response = """
+    {
+      "overview": "A launch sync needs a calendar hold.",
+      "keyPoints": ["Schedule the launch sync", "Share the agenda"],
+      "suggestions": [
+        {
+          "title": "Schedule launch sync",
+          "priority": "medium",
+          "dueHint": "next week",
+          "action": "calendarHold",
+          "rationale": "The team needs time reserved for launch coordination.",
+          "confidence": 0.84
+        }
+      ]
+    }
+    """
+    let chunks = [
+        "{",
+        """
+        {
+          "overview": "A launch sync needs a calendar hold.",
+          "keyPoints": ["Schedule the launch sync"],
+          "suggestions": []
+        }
+        """,
+        response,
+    ]
+    let model = StaticLanguageModelClient(
+        state: .available,
+        response: response,
+        streamChunks: chunks
+    )
+    let service = LocalAssistService(primaryModel: model)
+
+    var partials: [String] = []
+    var summary: StructuredSummary?
+
+    for try await update in service.streamSummary(
+        AssistantRequest(sourceText: "Schedule a launch sync next week and share the agenda.")
+    ) {
+        if update.phase == .streamingModel, !update.partialText.isEmpty {
+            partials.append(update.partialText)
+        }
+        if let final = update.summary {
+            summary = final
+        }
+    }
+
+    return (partials, summary)
+}
+
 private func sampleRun(index: Int, latency: Double) -> AssistantRun {
     let suggestion = TaskSuggestion(
         id: "task-\(index)",
@@ -340,7 +448,7 @@ private func sampleRun(index: Int, latency: Double) -> AssistantRun {
         summary: summary,
         metrics: RunMetrics(
             startedAt: Date(timeIntervalSince1970: Double(index)),
-            finishedAt: Date(timeIntervalSince1970: Double(index) + latency / 1_000),
+            finishedAt: Date(timeIntervalSince1970: Double(index) + latency / 1000),
             durationMilliseconds: latency,
             source: .deterministicFallback,
             suggestionCount: 1,

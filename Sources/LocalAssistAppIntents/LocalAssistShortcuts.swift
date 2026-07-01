@@ -10,10 +10,28 @@ public struct LocalAssistShortcuts: AppShortcutsProvider {
             phrases: [
                 "Summarize with \(.applicationName)",
                 "Run \(.applicationName) on my notes",
-                "Create tasks with \(.applicationName)"
+                "Create tasks with \(.applicationName)",
             ],
             shortTitle: "Summarize Notes",
             systemImageName: "sparkles"
+        )
+        AppShortcut(
+            intent: CreateReminderDraftIntent(),
+            phrases: [
+                "Draft a reminder with \(.applicationName)",
+                "Find my next task with \(.applicationName)",
+            ],
+            shortTitle: "Draft Reminder",
+            systemImageName: "bell.badge"
+        )
+        AppShortcut(
+            intent: ShowRecentRunsIntent(),
+            phrases: [
+                "Show \(.applicationName) history",
+                "Show recent runs in \(.applicationName)",
+            ],
+            shortTitle: "Recent Runs",
+            systemImageName: "clock.arrow.circlepath"
         )
     }
 }

@@ -13,6 +13,9 @@ public final class LocalAssistViewModel: ObservableObject {
     @Published public private(set) var history: [AssistantRun]
     @Published public private(set) var aggregateMetrics: AggregateRunMetrics
     @Published public private(set) var isGenerating: Bool
+    @Published public private(set) var generationPhase: SummaryGenerationPhase?
+    @Published public private(set) var generationMessage: String?
+    @Published public private(set) var streamingPartialText: String
     @Published public private(set) var errorMessage: String?
 
     private let worker: LocalAssistWorker
@@ -28,13 +31,16 @@ public final class LocalAssistViewModel: ObservableObject {
         self.maxSuggestions = maxSuggestions
         self.forceOfflineFallback = forceOfflineFallback
         self.worker = worker
-        self.run = nil
-        self.preparedActions = []
-        self.availability = nil
-        self.history = []
-        self.aggregateMetrics = AggregateRunMetrics(runs: [])
-        self.isGenerating = false
-        self.errorMessage = nil
+        run = nil
+        preparedActions = []
+        availability = nil
+        history = []
+        aggregateMetrics = AggregateRunMetrics(runs: [])
+        isGenerating = false
+        generationPhase = nil
+        generationMessage = nil
+        streamingPartialText = ""
+        errorMessage = nil
     }
 
     deinit {
@@ -62,6 +68,9 @@ public final class LocalAssistViewModel: ObservableObject {
         errorMessage = nil
         isGenerating = true
         preparedActions = []
+        generationPhase = .validating
+        generationMessage = "Starting local generation"
+        streamingPartialText = ""
 
         let request = AssistantRequest(
             sourceText: inputText,
@@ -71,8 +80,31 @@ public final class LocalAssistViewModel: ObservableObject {
 
         generationTask = Task { [weak self] in
             guard let self else { return }
+            let startedAt = Date()
+            var finalSummary: StructuredSummary?
+
             do {
-                let run = try await worker.summarize(request, forceFallback: useFallback)
+                let stream = await worker.streamSummary(request, forceFallback: useFallback)
+                for try await update in stream {
+                    guard !Task.isCancelled else { return }
+                    self.generationPhase = update.phase
+                    self.generationMessage = update.message
+                    self.streamingPartialText = update.partialText
+                    if let summary = update.summary {
+                        finalSummary = summary
+                        self.availability = summary.diagnostics.availability
+                    }
+                }
+
+                guard let finalSummary else {
+                    throw LocalAssistError.generationDidNotFinish
+                }
+
+                let run = await worker.makeRun(
+                    request: request,
+                    summary: finalSummary,
+                    startedAt: startedAt
+                )
                 let prepared = try await worker.prepareActions(run.summary.actionDrafts)
                 let history = await worker.record(run)
                 guard !Task.isCancelled else { return }
@@ -84,6 +116,7 @@ public final class LocalAssistViewModel: ObservableObject {
                 self.isGenerating = false
             } catch is CancellationError {
                 self.isGenerating = false
+                self.generationMessage = "Cancelled"
             } catch {
                 self.errorMessage = error.localizedDescription
                 self.isGenerating = false
@@ -94,12 +127,16 @@ public final class LocalAssistViewModel: ObservableObject {
     public func cancel() {
         generationTask?.cancel()
         isGenerating = false
+        generationMessage = "Cancelled"
     }
 
     public func resetSample() {
         inputText = Self.sampleInput
         run = nil
         preparedActions = []
+        generationPhase = nil
+        generationMessage = nil
+        streamingPartialText = ""
         errorMessage = nil
     }
 
@@ -113,7 +150,8 @@ public final class LocalAssistViewModel: ObservableObject {
     }
 
     public static let sampleInput = """
-    Review the onboarding doc, send Mira the blockers by Friday, and schedule a design sync next week. Update the launch checklist before the beta build ships.
+    Review the onboarding doc, send Mira the blockers by Friday, and schedule a design sync next week. \
+    Update the launch checklist before the beta build ships.
     """
 }
 
@@ -148,11 +186,43 @@ public actor LocalAssistWorker {
         return try await service.summarizeWithMetrics(request)
     }
 
+    public func streamSummary(
+        _ request: AssistantRequest,
+        forceFallback: Bool
+    ) -> AsyncThrowingStream<SummaryGenerationUpdate, Error> {
+        let service = forceFallback ? fallbackService : liveService
+        return service.streamSummary(request)
+    }
+
+    public func makeRun(
+        request: AssistantRequest,
+        summary: StructuredSummary,
+        startedAt: Date
+    ) -> AssistantRun {
+        let finishedAt = Date()
+        return AssistantRun(
+            request: request,
+            summary: summary,
+            metrics: RunMetrics(
+                startedAt: startedAt,
+                finishedAt: finishedAt,
+                durationMilliseconds: max(0, finishedAt.timeIntervalSince(startedAt) * 1000),
+                source: summary.source,
+                suggestionCount: summary.suggestions.count,
+                actionDraftCount: summary.actionDrafts.count,
+                keyPointCount: summary.keyPoints.count,
+                inputCharacterCount: request.sourceText.count,
+                outputByteCount: (try? SummaryFormatter.jsonData(summary, prettyPrinted: false).count) ?? 0,
+                fallbackReason: summary.diagnostics.fallbackReason
+            )
+        )
+    }
+
     public func prepareActions(_ drafts: [ToolActionDraft]) async throws -> [PreparedToolAction] {
         var prepared: [PreparedToolAction] = []
         for draft in drafts {
             try Task.checkCancellation()
-            prepared.append(try await actionPreparer.prepare(draft))
+            try prepared.append(await actionPreparer.prepare(draft))
         }
         return prepared
     }

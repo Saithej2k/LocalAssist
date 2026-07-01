@@ -25,13 +25,14 @@ Record:
 
 ## Xcode Instruments Workflow
 
-1. Open the package in Xcode.
-2. Run the iOS app target from `Apps/iOS/LocalAssist`.
-3. Profile with the Time Profiler template.
-4. Add Points of Interest and filter subsystem `com.saithej.localassist`.
-5. Add Allocations to inspect peak memory.
-6. Run once with the Foundation Models adapter enabled and once with the deterministic fallback path.
-7. Capture cancellation by cancelling an in-flight generation.
+1. Run `xcodegen generate`.
+2. Open `LocalAssist.xcodeproj` in Xcode 26 or newer.
+3. Run the `LocalAssist` iOS app target.
+4. Profile with the Time Profiler template.
+5. Add Points of Interest and filter subsystem `com.saithej.localassist`.
+6. Add Allocations to inspect peak memory.
+7. Run once with the Foundation Models adapter enabled and once with the deterministic fallback path.
+8. Capture cancellation by cancelling an in-flight generation.
 
 ## Measurement Template
 
@@ -44,6 +45,6 @@ Record:
 
 ## Latest Local Baseline
 
-See [2026-06-30-baseline.md](performance/2026-06-30-baseline.md).
+See [2026-07-01-baseline.md](performance/2026-07-01-baseline.md).
 
 The local CLI baseline measures deterministic fallback performance for repeatable CI. It is not the same measurement as the 1,420 ms to 910 ms Foundation Models Instruments profile.
