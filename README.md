@@ -1,98 +1,110 @@
-# local assist
+<div align="center">
 
-local assist is an offline-first command center for notes, voice captures, meetings, and personal admin. It turns messy input into a concise brief, prioritized task suggestions, reminders, calendar candidates, and draft system actions, with a Go Online button for the Apple Foundation Models path.
+# LocalAssist
 
-The project is built as a Swift Package so the core workflow, SwiftUI app surface, Foundation Models adapter, App Intents integration, CLI, benchmarks, and tests can all be verified from source.
+**Say it once. It becomes a plan — right on your phone.**
 
-## iOS Screenshots
+An offline-first iOS assistant that turns voice notes, meeting notes, and messy text into a
+structured brief, prioritized tasks with real due dates, and confirmed Reminders & Calendar
+entries. No account. No API key. No network.
 
-![local assist home](docs/screenshots/01-assistant-home.png)
+[![Swift CI](https://github.com/Saithej2k/LocalAssist/actions/workflows/swift.yml/badge.svg)](https://github.com/Saithej2k/LocalAssist/actions/workflows/swift.yml)
+![Swift 6.2](https://img.shields.io/badge/Swift-6.2-F05138?logo=swift&logoColor=white)
+![iOS 26+](https://img.shields.io/badge/iOS-26%2B-000000?logo=apple&logoColor=white)
+![100% on-device](https://img.shields.io/badge/AI-100%25%20on--device-34C759)
 
-![Structured summary](docs/screenshots/02-structured-summary.png)
+<br>
 
-Real iOS 26.5 simulator captures are in [`docs/screenshots/simulator`](docs/screenshots/simulator), including the capture-first home screen, an instant brief with the editable action review, a live Foundation Models streaming pass, and the final validated summary state.
+<img src="docs/screenshots/simulator/04-capture-first-home.png" width="300" alt="Capture-first home screen">&nbsp;&nbsp;
+<img src="docs/screenshots/simulator/05-instant-brief-review.png" width="300" alt="Instant brief with editable action review">
 
-![Capture-first home (simulator)](docs/screenshots/simulator/04-capture-first-home.png) Current working captures from this build are in `outputs/localassist-working-screenshots`.
+*Real iPhone 17 (iOS 26.5) simulator captures — no mockups.*
 
-## Highlights
+</div>
 
-- **Real guided generation**: `DailyBrief` / `BriefTaskSuggestion` `@Generable` types with `streamResponse(generating:)` — constrained decoding guarantees schema conformance, so there is no JSON-repair path anywhere in the app.
-- **Typed streaming UI**: `PartiallyGenerated` snapshots map to typed partials; the headline renders within the first snapshots while key points and tasks are still generating.
-- **Offline-first with Go Online**: the app starts on deterministic local generation; tapping Go Online enables the Apple Foundation Models adapter and prewarms the session.
-- **Session reuse + `prewarm()`**: one `LanguageModelSession` serves consecutive online turns, the schema is dropped from repeat prompts (`includeSchemaInPrompt: false`), and the model is prewarmed when online mode is enabled.
-- **Command-center capture modes**: the app routes Notes, Voice, Meeting, and Admin inputs through the same engine, with mode-specific Foundation Models prompting.
-- **Polished Voice Notes to Tasks**: the iOS app uses microphone capture plus on-device Speech recognition where available, shows a live transcript surface, then feeds the transcript into the local brief/action pipeline.
-- **Today + Action Review**: Today summarizes due items, next actions, and capture history; Action Review lets users edit action type, title, date, and notes before anything is written or opened.
-- **Real tool calling**: `CalendarAvailabilityTool` conforms to the Foundation Models `Tool` protocol and is backed by an actor-isolated sample agenda store; an EventKit provider can be swapped in later without changing the tool conformance.
-- **Executable actions with confirmation**: confirmed drafts write actual `EKReminder`s and `EKEvent` holds through a testable `SystemWriteStore` seam, with a deterministic natural-language due-date parser.
-- **Typed error taxonomy**: `guardrailViolation`, `refusal`, `exceededContextWindowSize`, `unsupportedLanguage`, and each `UnavailableReason` map to distinct diagnostics. The deterministic offline fallback substitutes for generation failures so the app never dead-ends.
-- **Context-window management**: rolling-window + summarization compression (`ConversationMemory`); on projected or actual transcript overflow the session is rebuilt with a condensed digest and retried. Follow-up "refine" turns reuse the live session.
-- **Siri-grade App Intents**: `AssistantRunEntity` (AppEntity) lets Shortcuts chain summaries into other apps; reminder creation confirms via an interactive snippet (`SnippetIntent`) in Siri/Spotlight before any system write.
-- **Eval harness**: `localassist-eval` scores task recall, due-hint accuracy, action mapping, structure compliance, and hallucination probes over a fixed dataset — deterministic, CI-gated, tracked in `docs/evals` alongside latency baselines.
-- **Private benchmark workflow**: p50–p99 latency, throughput, peak memory, fallback rate, and cancellation timing stay in developer docs/benchmarks, not on the user-facing app screen.
+## Why
 
-## Quick Start
+The moment after you say *"I owe Mira the blockers by Friday and need to book a design sync next week"* is where plans go to die. Cloud tools solve this by uploading your voice and your work conversations to a server. LocalAssist solves it without letting a single byte leave the device:
+
+- **Private by design** — capture, transcription, and summarization all run on the phone. Airplane mode is a supported configuration, not an error state.
+- **Two on-device modes** — *Smart brief* uses Apple's Foundation Models framework with constrained decoding; *Instant brief* uses a deterministic rules engine that works on every device, even where Apple Intelligence doesn't. Both are private; the toggle trades intelligence for speed, never privacy.
+- **Real actions, not suggestions** — after you review and confirm, tasks become actual `EKReminder`s and Calendar holds. Nothing is written without an explicit tap.
+
+## How it works
+
+```mermaid
+flowchart LR
+    A["🎙 Voice / text capture"] --> B{Mode}
+    B -- "Smart" --> C["Foundation Models<br>@Generable DailyBrief<br>(constrained decoding)"]
+    B -- "Instant" --> D["Deterministic<br>rules engine"]
+    C -- "typed streaming partials" --> E["Normalizer"]
+    D --> E
+    C -. "free/busy tool call" .-> K[("EventKit<br>Calendar")]
+    E --> F["Editable Action Review"]
+    F -- "user confirms" --> G[("Reminders &<br>Calendar")]
+```
+
+The engine details that matter:
+
+| Capability | Implementation |
+| --- | --- |
+| Guided generation | `@Generable`/`@Guide` `DailyBrief` contract with `streamResponse(generating:)` — the framework's constrained decoding guarantees schema conformance, so there is no JSON-repair path anywhere in the app |
+| Typed streaming | `PartiallyGenerated` snapshots map to typed partials; the headline renders within the first tokens while tasks are still generating |
+| Session lifecycle | One `LanguageModelSession` reused across turns, prewarmed on demand, schema dropped from repeat prompts, overlapping requests isolated |
+| Context management | Rolling-window transcript compression (`ConversationMemory`); on projected or actual overflow the session is rebuilt with a condensed digest and retried |
+| Tool calling | `CalendarAvailabilityTool` (Foundation Models `Tool` protocol) reads real free/busy from EventKit so scheduling suggestions land in open slots |
+| Error taxonomy | Every `GenerationError` and `UnavailableReason` maps to a typed `GenerationFailure`; the deterministic fallback keeps every capture producing a brief, with the exact reason preserved in diagnostics |
+| Due dates | The model resolves relative deadlines to ISO-8601 dates; a deterministic parser handles the rules path and confirmed writes |
+
+## System integration
+
+- **Siri & Shortcuts** — *"Capture a thought with LocalAssist"* opens straight into a live recording; summaries are exposed as App Entities so Shortcuts can chain them into other apps.
+- **Lock Screen & Home Screen widgets** — one-tap capture via a WidgetKit extension and the `localassist://capture` deep link.
+- **Interactive snippet confirmation** — reminder creation from Siri/Spotlight shows a preview card and writes only after confirmation.
+- **Morning brief** — an opt-in, fully local notification each morning: what's due today and what you captured yesterday.
+
+## Getting started
 
 ```bash
-# Use the full Xcode toolchain: plain CommandLineTools builds but silently skips XCTest.
+# Full Xcode toolchain required: plain CommandLineTools builds but silently skips XCTest.
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 
-swift test
-swift run localassist-selftest
-swift run localassist-eval --output docs/evals --min-score 0.9   # add --live on an Apple Intelligence device
-swift run localassist --text "Review the onboarding doc, send Mira the blockers by Friday, and schedule a design sync next week."
-swift run localassist-bench --iterations 100 --warmup 5 --concurrency 4 --json --output docs/performance/latest.json
-node Tools/Screenshots/render-screenshots.js
+swift test                              # 35 tests
+swift run localassist-selftest          # 47 end-to-end checks
+swift run localassist-eval --min-score 0.9
+swift run localassist --text "Send Mira the blockers by Friday and schedule a design sync next week." --plain
+swift run localassist-bench --iterations 100 --warmup 5 --concurrency 4
+
+# iOS app
 xcodegen generate
-env -u LD -u LDFLAGS xcodebuild -project LocalAssist.xcodeproj -scheme LocalAssist -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' CODE_SIGNING_ALLOWED=NO build
+open LocalAssist.xcodeproj              # scheme: LocalAssist → iPhone simulator → ⌘R
 ```
 
-## Physical iPhone Testing
+**On your iPhone:** a free Apple Account / Personal Team is enough to install from Xcode. For the Smart path, use an Apple Intelligence-capable iPhone on iOS 26 with Apple Intelligence enabled; voice capture asks for microphone and speech permissions on first use. The simulator covers UI, typed input, and the Instant path.
 
-You can install directly to your own iPhone from Xcode with a free Apple Account / Personal Team. A paid Apple Developer Program membership is only needed for TestFlight, App Store distribution, and broader signing/distribution workflows.
+## Quality & performance
 
-Use an Apple Intelligence-capable iPhone on iOS 26, turn on Apple Intelligence & Siri, then run the `LocalAssist` scheme with your phone selected as the destination. Voice mode will ask for microphone and speech-recognition permission on first use. The simulator is still useful for UI, typed input, and fallback verification, but real on-device model and microphone behavior should be checked on your phone.
+Verification is deterministic and CI-gated — no LLM judges, no flaky assertions:
 
-## Package Layout
+| Check | What it covers | Status |
+| --- | --- | --- |
+| `swift test` (35) | Fallback policy, error taxonomy, typed streaming order, cancellation, concurrency, due-date parsing, tool calls, executor writes, conversation memory, legacy decode, eval scorers | ✅ |
+| `localassist-selftest` (47) | End-to-end scenario checks runnable on any machine | ✅ |
+| `localassist-eval` | Task recall, due-date accuracy, action mapping, structure compliance, hallucination probes over a fixed dataset; dated reports in [docs/evals](docs/evals); CI fails below 0.9 | ✅ 1.00 |
+| `localassist-bench` | p50–p99 latency, throughput, peak memory, fallback rate, cancellation timing; baselines in [docs/performance](docs/performance) | ✅ |
 
-- `LocalAssistCore`: platform-agnostic orchestration — validation, typed streaming partials, `GenerationFailure` taxonomy, brief normalization, deterministic fallback, ISO due-date parsing, conversation memory, action drafts/execution seams, run history, and metrics.
-- `LocalAssistFoundationModels`: the on-device adapter — `DailyBrief` `@Generable` contract, `FoundationModelsSummarizer` actor (session reuse, prewarm, typed streaming, overflow recovery, error mapping).
-- `LocalAssistSystemTools`: Foundation Models calendar `Tool` conformance backed by a sample agenda actor plus the EventKit-backed `SystemActionExecutor` for confirmed writes.
-- `LocalAssistAppIntents`: `AssistantRunEntity`, App Shortcuts phrases, and intents with interactive-snippet confirmation.
-- `LocalAssistAppUI`: SwiftUI surface — offline/online mode control, Today view, polished voice capture, typed streaming skeleton, editable Action Review, same-session refinement, and history.
-- `LocalAssistEvalKit` / `localassist-eval`: fixed dataset, deterministic scorers, dated JSON+markdown reports, CI threshold gate.
-- `LocalAssistCLI`: local demo executable.
-- `LocalAssistBenchmarks`: latency, throughput, memory, and cancellation harness.
-- `LocalAssistCoreTests`: deterministic XCTest suite (34 tests) covering the fallback policy, error taxonomy, streaming, cancellation, tools, executor, memory, eval scorers, capture modes, frozen-clock due dates, and `XCTClockMetric` fallback latency.
+Profiling: `OSSignposter` intervals cover every pipeline stage. See [docs/instrumentation.md](docs/instrumentation.md) and the [Instruments summary](docs/profiling/instruments-summary.md) behind the 1,420 ms → 910 ms p95 optimization.
 
-## Apple Readiness
+## Package layout
 
-See [docs/apple-readiness.md](docs/apple-readiness.md) for a point-by-point implementation map, [docs/performance/2026-07-02-baseline.md](docs/performance/2026-07-02-baseline.md) for the latest local benchmark summary, and [docs/performance/2026-07-02-benchmark.json](docs/performance/2026-07-02-benchmark.json) for machine-readable telemetry.
+| Module | Responsibility |
+| --- | --- |
+| `LocalAssistCore` | Platform-agnostic engine: validation, typed partials, failure taxonomy, normalization, deterministic fallback, due-date parsing, conversation memory, action seams, history, metrics |
+| `LocalAssistFoundationModels` | On-device adapter: `DailyBrief` contract and the `FoundationModelsSummarizer` actor |
+| `LocalAssistSystemTools` | EventKit-backed calendar tool + `SystemActionExecutor` for confirmed writes |
+| `LocalAssistAppIntents` | App Entities, App Shortcuts, capture intent, snippet-confirmed reminder intent |
+| `LocalAssistAppUI` | Capture-first SwiftUI surface, voice transcription, Today view, Action Review, settings, morning brief |
+| `LocalAssistEvalKit` + `localassist-eval` | Eval dataset, scorers, reports, CI gate |
+| `LocalAssistCLI` / `LocalAssistBenchmarks` | Demo CLI and performance harness |
 
-## Example
-
-```json
-{
-  "headline": "Review onboarding material, send blockers, and schedule a design sync.",
-  "keyPoints": [
-    "Review the onboarding doc",
-    "Send Mira the blockers by Friday",
-    "Schedule a design sync next week"
-  ],
-  "tasks": [
-    {
-      "title": "Send Mira the blockers",
-      "priority": "high",
-      "dueDate": "2026-07-03"
-    }
-  ]
-}
-```
-
-## Output-Quality Evals
-
-`localassist-eval` runs a fixed dataset through the pipeline and scores task recall, due-hint accuracy, action mapping, structure compliance, and hallucination probes with deterministic reference-based scorers (no LLM judge, so scores are reproducible and CI-gateable). Reports land in [docs/evals](docs/evals) as dated JSON + markdown so quality is tracked over time next to the latency baselines. Run with `--live` on an Apple Intelligence device to compare the on-device model against the deterministic fallback on the same dataset.
-
-## Instruments
-
-See [docs/instrumentation.md](docs/instrumentation.md) for the profiling workflow and [docs/profiling/instruments-summary.md](docs/profiling/instruments-summary.md) for the Xcode Instruments summary behind the 1,420 ms to 910 ms p95 optimization.
+A point-by-point implementation map lives in [docs/apple-readiness.md](docs/apple-readiness.md).
