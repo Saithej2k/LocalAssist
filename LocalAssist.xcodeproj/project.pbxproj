@@ -7,17 +7,47 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		24D3489A13F3042166EA419B /* LocalAssistWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E5F9BBCA987616D5B771010B /* LocalAssistWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		39F3E037752E8918CD7F4260 /* LocalAssistAppUI in Frameworks */ = {isa = PBXBuildFile; productRef = F56DF276EC9529872816ED1D /* LocalAssistAppUI */; };
+		41C734909577BF5037DCEE47 /* LocalAssistWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 530C6110899A20B711F3DE30 /* LocalAssistWidgets.swift */; };
 		BFC076489D64683D42671182 /* LocalAssistAppIntents in Frameworks */ = {isa = PBXBuildFile; productRef = 1D86B0D8943AC4A670A007A5 /* LocalAssistAppIntents */; };
+		D7803D24F14846782D1A0EBE /* LocalAssistCore in Frameworks */ = {isa = PBXBuildFile; productRef = D051C16E3E17EEED90957D50 /* LocalAssistCore */; };
 		DF1BD8CA7BEEEEB342DD358D /* LocalAssistApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB96F71AF087606A91C81EB1 /* LocalAssistApp.swift */; };
 		E1752C1D449EF56BF1CCB7E2 /* LocalAssistFoundationModels in Frameworks */ = {isa = PBXBuildFile; productRef = 7C777688435504B873D7A4D0 /* LocalAssistFoundationModels */; };
-		F893FB45E2C69FC213781AF5 /* LocalAssistCore in Frameworks */ = {isa = PBXBuildFile; productRef = D051C16E3E17EEED90957D50 /* LocalAssistCore */; };
+		F893FB45E2C69FC213781AF5 /* LocalAssistSystemTools in Frameworks */ = {isa = PBXBuildFile; productRef = 1153334359FBB43B0BF5C260 /* LocalAssistSystemTools */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		116FE9C845008AECFC9D23F2 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7E7F5AFDDAA9527B9AD3238A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 92C0B1C1721189CDD23D6339;
+			remoteInfo = LocalAssistWidgets;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		18FDBC9DE68A92D861604FB3 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				24D3489A13F3042166EA419B /* LocalAssistWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		530C6110899A20B711F3DE30 /* LocalAssistWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalAssistWidgets.swift; sourceTree = "<group>"; };
+		53DCCBE20696642DA66BD5DF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5ED7E8C53374413AB4397426 /* LocalAssist.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = LocalAssist.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C5C84973C77D20E0EE140564 /* build-this-end-to-end-and */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "build-this-end-to-end-and"; path = .; sourceTree = SOURCE_ROOT; };
 		DB96F71AF087606A91C81EB1 /* LocalAssistApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalAssistApp.swift; sourceTree = "<group>"; };
+		E5F9BBCA987616D5B771010B /* LocalAssistWidgets.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = LocalAssistWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		EDC2D2D1366B5719213002B4 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -29,7 +59,8 @@
 				39F3E037752E8918CD7F4260 /* LocalAssistAppUI in Frameworks */,
 				BFC076489D64683D42671182 /* LocalAssistAppIntents in Frameworks */,
 				E1752C1D449EF56BF1CCB7E2 /* LocalAssistFoundationModels in Frameworks */,
-				F893FB45E2C69FC213781AF5 /* LocalAssistCore in Frameworks */,
+				F893FB45E2C69FC213781AF5 /* LocalAssistSystemTools in Frameworks */,
+				D7803D24F14846782D1A0EBE /* LocalAssistCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -40,6 +71,7 @@
 			isa = PBXGroup;
 			children = (
 				CA733D0BC63BE407D0131627 /* LocalAssist */,
+				CAA1FEB2B7B4829D2B388DBF /* LocalAssistWidgets */,
 				957BE41A39892D25162FD8C4 /* Packages */,
 				9B5D117BD0180B4CC40A1AD5 /* Products */,
 			);
@@ -57,6 +89,7 @@
 			isa = PBXGroup;
 			children = (
 				5ED7E8C53374413AB4397426 /* LocalAssist.app */,
+				E5F9BBCA987616D5B771010B /* LocalAssistWidgets.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -71,6 +104,16 @@
 			path = Apps/iOS/LocalAssist;
 			sourceTree = "<group>";
 		};
+		CAA1FEB2B7B4829D2B388DBF /* LocalAssistWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				53DCCBE20696642DA66BD5DF /* Info.plist */,
+				530C6110899A20B711F3DE30 /* LocalAssistWidgets.swift */,
+			);
+			name = LocalAssistWidgets;
+			path = Apps/iOS/LocalAssistWidgets;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -80,21 +123,41 @@
 			buildPhases = (
 				10357D2488D361BFFE03FCBA /* Sources */,
 				C444FFF63FA58CF2F0FA250D /* Frameworks */,
+				18FDBC9DE68A92D861604FB3 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				451497377E1D556938DB3195 /* PBXTargetDependency */,
 			);
 			name = LocalAssist;
 			packageProductDependencies = (
 				F56DF276EC9529872816ED1D /* LocalAssistAppUI */,
 				1D86B0D8943AC4A670A007A5 /* LocalAssistAppIntents */,
 				7C777688435504B873D7A4D0 /* LocalAssistFoundationModels */,
+				1153334359FBB43B0BF5C260 /* LocalAssistSystemTools */,
 				D051C16E3E17EEED90957D50 /* LocalAssistCore */,
 			);
 			productName = LocalAssist;
 			productReference = 5ED7E8C53374413AB4397426 /* LocalAssist.app */;
 			productType = "com.apple.product-type.application";
+		};
+		92C0B1C1721189CDD23D6339 /* LocalAssistWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 234CAC3C6551AB64C40C3D4A /* Build configuration list for PBXNativeTarget "LocalAssistWidgets" */;
+			buildPhases = (
+				CB911FF56BCA668E0E1F3119 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LocalAssistWidgets;
+			packageProductDependencies = (
+			);
+			productName = LocalAssistWidgets;
+			productReference = E5F9BBCA987616D5B771010B /* LocalAssistWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -106,6 +169,9 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					04B48E43F6357ECAC0022B36 = {
+						ProvisioningStyle = Automatic;
+					};
+					92C0B1C1721189CDD23D6339 = {
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -128,6 +194,7 @@
 			projectRoot = "";
 			targets = (
 				04B48E43F6357ECAC0022B36 /* LocalAssist */,
+				92C0B1C1721189CDD23D6339 /* LocalAssistWidgets */,
 			);
 		};
 /* End PBXProject section */
@@ -141,9 +208,46 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CB911FF56BCA668E0E1F3119 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				41C734909577BF5037DCEE47 /* LocalAssistWidgets.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		451497377E1D556938DB3195 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 92C0B1C1721189CDD23D6339 /* LocalAssistWidgets */;
+			targetProxy = 116FE9C845008AECFC9D23F2 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		2336C46AEA425A9FBE7F38B5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Apps/iOS/LocalAssistWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.saithej.localassist.widgets;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		25323E0A5C770E89758CA599 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -305,9 +409,39 @@
 			};
 			name = Release;
 		};
+		F9819EDD06B76A9692F24CF5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Apps/iOS/LocalAssistWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.saithej.localassist.widgets;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		234CAC3C6551AB64C40C3D4A /* Build configuration list for PBXNativeTarget "LocalAssistWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F9819EDD06B76A9692F24CF5 /* Debug */,
+				2336C46AEA425A9FBE7F38B5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		4671FDF30DBF8A8A3B405F81 /* Build configuration list for PBXNativeTarget "LocalAssist" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -336,6 +470,10 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		1153334359FBB43B0BF5C260 /* LocalAssistSystemTools */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LocalAssistSystemTools;
+		};
 		1D86B0D8943AC4A670A007A5 /* LocalAssistAppIntents */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = LocalAssistAppIntents;

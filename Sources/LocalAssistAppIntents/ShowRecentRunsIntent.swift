@@ -1,11 +1,12 @@
 import AppIntents
 import LocalAssistCore
 
-@available(macOS 13.0, iOS 16.0, *)
 public struct ShowRecentRunsIntent: AppIntent {
     public static let title: LocalizedStringResource = "Show LocalAssist Runs"
     public static let description = IntentDescription(
-        "Show recent private LocalAssist summaries and latency metrics saved on this device."
+        "Show recent private LocalAssist summaries and latency metrics saved on this device.",
+        categoryName: "Summaries",
+        resultValueName: "Recent Summaries"
     )
 
     @Parameter(title: "Limit", default: 3)
@@ -17,23 +18,29 @@ public struct ShowRecentRunsIntent: AppIntent {
         self.limit = limit
     }
 
-    public func perform() async throws -> some IntentResult & ReturnsValue<String> {
+    public func perform() async throws -> some IntentResult & ReturnsValue<[AssistantRunEntity]> & ProvidesDialog {
         guard let store = RunHistoryStore.applicationSupportOrNil(limit: 50) else {
-            return .result(value: "Run history is unavailable on this device.")
+            return .result(value: [], dialog: "Run history is unavailable on this device.")
         }
 
         let runs = try await store.load()
         guard !runs.isEmpty else {
-            return .result(value: "No LocalAssist runs have been saved yet.")
+            return .result(value: [], dialog: "No LocalAssist runs have been saved yet.")
         }
 
         let safeLimit = min(max(limit, 1), 5)
-        let lines = runs.prefix(safeLimit).enumerated().map { index, run in
-            let source = run.summary.source == .foundationModels ? "model" : "fallback"
-            let latency = run.metrics.durationMilliseconds.formatted(.number.precision(.fractionLength(0)))
-            return "\(index + 1). \(run.summary.overview) [\(source), \(latency) ms]"
-        }
+        let entities = runs.prefix(safeLimit).map(AssistantRunEntity.init(run:))
+        let latency = runs.prefix(safeLimit)
+            .map { $0.metrics.durationMilliseconds }
+            .reduce(0, +) / Double(min(safeLimit, runs.count))
+        let latencyText = latency.formatted(.number.precision(.fractionLength(0)))
 
-        return .result(value: lines.joined(separator: "\n"))
+        return .result(
+            value: Array(entities),
+            dialog: IntentDialog(
+                full: "Here are your last \(entities.count) summaries. Average latency was \(latencyText) milliseconds.",
+                supporting: "All processing stayed on this device."
+            )
+        )
     }
 }

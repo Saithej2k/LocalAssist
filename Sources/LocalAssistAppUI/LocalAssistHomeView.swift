@@ -1,9 +1,17 @@
 import LocalAssistCore
 import SwiftUI
+#if canImport(UIKit)
+    import UIKit
+#endif
+#if canImport(AppKit)
+    import AppKit
+#endif
 
 public struct LocalAssistHomeView: View {
     @StateObject private var viewModel: LocalAssistViewModel
+    @StateObject private var voiceTranscriber = VoiceNoteTranscriber()
     @State private var didRunLaunchAutomation = false
+    @State private var showsSettings = false
 
     public init(viewModel: LocalAssistViewModel = LocalAssistViewModel()) {
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -13,35 +21,46 @@ public struct LocalAssistHomeView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    AppHeaderView(availability: viewModel.availability)
+                    AppHeaderView(
+                        usesSmartModel: viewModel.usesSmartModel,
+                        onToggle: { viewModel.toggleSmartMode() }
+                    )
 
-                    if let errorMessage = viewModel.errorMessage {
-                        StatusPanel(
-                            symbol: "exclamationmark.triangle.fill",
-                            title: "Could not summarize",
-                            message: errorMessage,
-                            tint: .red
-                        )
-                    }
+                    // Capture comes first: pocket-to-captured in seconds.
+                    InputComposerView(viewModel: viewModel, voiceTranscriber: voiceTranscriber)
 
                     if viewModel.isGenerating {
                         ProgressPanel(
                             phase: viewModel.generationPhase,
                             message: viewModel.generationMessage,
-                            partialText: viewModel.streamingPartialText
+                            partial: viewModel.streamingPartial
+                        )
+                    }
+
+                    if let errorMessage = viewModel.errorMessage {
+                        StatusPanel(
+                            symbol: "exclamationmark.triangle.fill",
+                            title: "Could not create brief",
+                            message: errorMessage,
+                            tint: .red
                         )
                     }
 
                     if let run = viewModel.run {
+                        ActionReviewView(
+                            actions: viewModel.preparedActions,
+                            executed: viewModel.executedActions,
+                            onConfirm: { viewModel.confirmAction($0) }
+                        )
                         SummaryResultView(run: run)
-                        ActionDraftsView(actions: viewModel.preparedActions)
-                        MetricsView(metrics: run.metrics)
+                        if run.summary.source == .foundationModels {
+                            RefineBarView(viewModel: viewModel)
+                        }
                     }
 
-                    InputComposerView(viewModel: viewModel)
+                    TodayView(currentRun: viewModel.run, history: viewModel.history)
 
-                    if viewModel.aggregateMetrics.runCount > 0 {
-                        AggregateMetricsView(metrics: viewModel.aggregateMetrics)
+                    if !viewModel.history.isEmpty {
                         RunHistoryView(runs: viewModel.history)
                     }
                 }
@@ -49,34 +68,48 @@ public struct LocalAssistHomeView: View {
                 .padding(.vertical, 18)
             }
             .background(LocalAssistColors.canvas)
-            .navigationTitle("LocalAssist")
+            .navigationTitle("local assist")
             #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
             #endif
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
-                        Menu {
-                            Button {
-                                viewModel.resetSample()
-                            } label: {
-                                Label("Reset sample", systemImage: "arrow.counterclockwise")
-                            }
-                            Button(role: .destructive) {
-                                viewModel.clearHistory()
-                            } label: {
-                                Label("Clear history", systemImage: "trash")
-                            }
+                        Button {
+                            showsSettings = true
                         } label: {
-                            Image(systemName: "ellipsis.circle")
+                            Image(systemName: "gearshape")
                         }
-                        .accessibilityLabel("More actions")
+                        .accessibilityLabel("Settings")
                     }
+                }
+                .sheet(isPresented: $showsSettings) {
+                    SettingsSheetView(viewModel: viewModel)
                 }
         }
         .task {
-            viewModel.refreshAvailability()
+            viewModel.prewarm()
             viewModel.loadHistory()
             runLaunchAutomationIfNeeded()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .localAssistCaptureRequested)) { _ in
+            startExternalCapture()
+        }
+        .onOpenURL { url in
+            if url.host == "capture" || url.path.contains("capture") {
+                startExternalCapture()
+            }
+        }
+    }
+
+    /// Entry from the App Shortcut or Lock Screen widget: land directly in a
+    /// live voice capture.
+    private func startExternalCapture() {
+        guard !voiceTranscriber.isRecording, !viewModel.isGenerating else {
+            return
+        }
+        viewModel.markExternalCaptureRequested()
+        Task {
+            await voiceTranscriber.start()
         }
     }
 
@@ -91,101 +124,498 @@ public struct LocalAssistHomeView: View {
         }
 
         didRunLaunchAutomation = true
+        if viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            viewModel.inputText = LocalAssistViewModel.sampleInput
+        }
         if environment["LOCALASSIST_FORCE_OFFLINE"] == "1" {
-            viewModel.forceOfflineFallback = true
+            viewModel.forceOfflineFallbackForAutomation()
         }
         viewModel.summarize()
     }
 }
 
 private struct AppHeaderView: View {
-    var availability: ModelAvailability?
+    var usesSmartModel: Bool
+    var onToggle: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Workspace")
-                        .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    Text("Today")
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("local assist")
                         .font(.system(.largeTitle, design: .rounded, weight: .bold))
                         .lineLimit(2)
+                    Text("Say it once. It becomes a plan — right on this phone.")
+                        .font(.system(.body, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Spacer(minLength: 12)
-                AvailabilityBadge(availability: availability)
             }
 
-            Text(availability?.isAvailable == true ? "On-device model ready" : "Offline fallback ready")
-                .font(.system(.body, design: .rounded))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            ModelModePill(usesSmartModel: usesSmartModel, onToggle: onToggle)
         }
+    }
+}
+
+/// Both modes are 100% on-device; the toggle trades deterministic speed for
+/// model quality, never privacy.
+private struct ModelModePill: View {
+    var usesSmartModel: Bool
+    var onToggle: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Label(
+                usesSmartModel ? "Smart brief · on-device AI" : "Instant brief · rules",
+                systemImage: usesSmartModel ? "brain.head.profile" : "bolt.fill"
+            )
+            .font(.system(.caption, design: .rounded, weight: .bold))
+            .foregroundStyle(usesSmartModel ? LocalAssistColors.accent : LocalAssistColors.success)
+            .lineLimit(1)
+            .minimumScaleFactor(0.78)
+
+            Label("Private", systemImage: "lock.fill")
+                .font(.system(.caption2, design: .rounded, weight: .bold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Spacer(minLength: 8)
+
+            Button {
+                onToggle()
+            } label: {
+                Text(usesSmartModel ? "Use Instant" : "Use Smart")
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(LocalAssistColors.accent)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(LocalAssistColors.surface.opacity(0.74), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(LocalAssistColors.border.opacity(0.55))
+        }
+        .accessibilityLabel(usesSmartModel ? "Smart brief mode, on-device AI, private" : "Instant brief mode, rule-based, private")
+    }
+}
+
+private struct TodayView: View {
+    var currentRun: AssistantRun?
+    var history: [AssistantRun]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: "Today", symbol: "sun.max.fill")
+
+            HStack(spacing: 10) {
+                TodayMetric(title: "Due today", value: "\(dueToday.count)", tint: LocalAssistColors.danger)
+                TodayMetric(title: "Actions", value: "\(nextActions.count)", tint: LocalAssistColors.accent)
+                TodayMetric(title: "Captures", value: "\(history.count)", tint: LocalAssistColors.success)
+            }
+
+            if nextActions.isEmpty {
+                Label("No actions yet. Capture a note or dictate a thought to build today’s list.", systemImage: "tray")
+                    .font(.system(.subheadline, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(nextActions.prefix(3), id: \.id) { suggestion in
+                        HStack(alignment: .top, spacing: 10) {
+                            PriorityDot(priority: suggestion.priority)
+                                .padding(.top, 5)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(suggestion.title)
+                                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Text(todayDetail(for: suggestion))
+                                    .font(.system(.caption, design: .rounded, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
+            }
+        }
+        .panel()
+    }
+
+    private var allSuggestions: [TaskSuggestion] {
+        let runs = ([currentRun].compactMap { $0 } + history)
+        return runs.flatMap(\.summary.tasks)
+    }
+
+    private var dueToday: [TaskSuggestion] {
+        allSuggestions.filter { suggestion in
+            guard let dueDate = suggestion.dueDate else {
+                return false
+            }
+            return Calendar.current.isDateInToday(dueDate)
+        }
+    }
+
+    private var nextActions: [TaskSuggestion] {
+        let todayIDs = Set(dueToday.map(\.id))
+        let prioritized = allSuggestions.filter { suggestion in
+            todayIDs.contains(suggestion.id) || suggestion.priority == .high || suggestion.action != .none
+        }
+        return Array(prioritized.prefix(6))
+    }
+
+    private func todayDetail(for suggestion: TaskSuggestion) -> String {
+        let action = suggestion.action.displayTitle
+        if let dueDate = suggestion.iso8601DueDate {
+            return "\(action) · \(dueDate)"
+        }
+        if let dueHint = suggestion.dueHint {
+            return "\(action) · \(dueHint)"
+        }
+        return action
+    }
+}
+
+private struct TodayMetric: View {
+    var title: String
+    var value: String
+    var tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(value)
+                .font(.system(.title3, design: .rounded, weight: .bold))
+            Text(title)
+                .font(.system(.caption, design: .rounded, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
 private struct InputComposerView: View {
     @ObservedObject var viewModel: LocalAssistViewModel
+    @ObservedObject var voiceTranscriber: VoiceNoteTranscriber
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Label("Source text", systemImage: "text.alignleft")
-                    .font(.system(.headline, design: .rounded))
-                Spacer()
-                Text("\(viewModel.inputText.count) chars")
-                    .font(.system(.caption, design: .rounded, weight: .medium))
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 16) {
+            // Hero: the mic is the primary way in. Typing is the fallback.
+            HStack(alignment: .center, spacing: 14) {
+                Button {
+                    if voiceTranscriber.isRecording {
+                        voiceTranscriber.stop()
+                    } else {
+                        viewModel.inputKind = .voiceNote
+                        Task {
+                            await voiceTranscriber.start()
+                        }
+                    }
+                } label: {
+                    Image(systemName: voiceTranscriber.isRecording ? "stop.fill" : "mic.fill")
+                        .font(.system(size: 26, weight: .bold))
+                        .frame(width: 72, height: 72)
+                }
+                .buttonStyle(VoiceButtonStyle(isRecording: voiceTranscriber.isRecording))
+                .disabled(viewModel.isGenerating || voiceTranscriber.state == .requestingPermission)
+                .accessibilityLabel(voiceTranscriber.isRecording ? "Stop voice capture" : "Start voice capture")
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(voiceTranscriber.isRecording ? "Listening…" : "Capture a thought")
+                        .font(.system(.headline, design: .rounded, weight: .bold))
+                    Text(voiceTranscriber.isRecording
+                        ? "Speak naturally. Tap stop when you're done."
+                        : "Tap the mic and say it — tasks, errands, follow-ups.")
+                        .font(.system(.caption, design: .rounded, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if voiceTranscriber.isRecording {
+                        VoiceLevelBars()
+                    }
+                }
+                Spacer(minLength: 0)
             }
 
-            TextEditor(text: $viewModel.inputText)
-                .font(.system(.body, design: .rounded))
-                .frame(minHeight: 150)
-                .padding(10)
-                .background(Color.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(LocalAssistColors.border)
-                }
-
-            VStack(spacing: 12) {
-                HStack {
-                    Label("Suggestions", systemImage: "slider.horizontal.3")
-                    Spacer()
-                    Text("\(Int(viewModel.maxSuggestions.rounded()))")
-                        .font(.system(.body, design: .rounded, weight: .semibold))
-                }
-                Slider(value: $viewModel.maxSuggestions, in: 1 ... 8, step: 1)
-
-                Toggle(isOn: $viewModel.forceOfflineFallback) {
-                    Label("Force offline fallback", systemImage: "wifi.slash")
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 78), spacing: 8)], spacing: 8) {
+                ForEach(AssistantInputKind.allCases, id: \.self) { kind in
+                    CaptureKindChip(
+                        kind: kind,
+                        isSelected: viewModel.inputKind == kind,
+                        action: { viewModel.inputKind = kind }
+                    )
                 }
             }
-            .font(.system(.subheadline, design: .rounded))
 
-            HStack(spacing: 12) {
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $viewModel.inputText)
+                    .font(.system(.body, design: .rounded))
+                    .frame(minHeight: 158)
+                    .padding(12)
+                    .scrollContentBackground(.hidden)
+
+                if viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(viewModel.inputKind.placeholder)
+                        .font(.system(.body, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 17)
+                        .padding(.vertical, 20)
+                        .allowsHitTesting(false)
+                }
+            }
+            .background(LocalAssistColors.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(LocalAssistColors.border)
+            }
+
+            if voiceTranscriber.isRecording || voiceTranscriber.state == .requestingPermission || !voiceTranscriber.transcript.isEmpty || voiceTranscriber.errorMessage != nil {
+                CompactVoiceStatusView(transcriber: voiceTranscriber)
+            }
+
+            HStack(spacing: 10) {
                 Button {
                     viewModel.summarize()
                 } label: {
-                    Label(viewModel.isGenerating ? "Running" : "Generate", systemImage: "sparkles")
+                    Label(viewModel.isGenerating ? "Working" : "Review Actions", systemImage: "checklist.checked")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(PrimaryButtonStyle())
-                .disabled(viewModel.isGenerating || viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(
+                    viewModel.isGenerating
+                        || voiceTranscriber.isRecording
+                        || viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
 
-                Button {
-                    viewModel.cancel()
-                } label: {
-                    Image(systemName: "xmark")
-                        .frame(width: 44, height: 44)
+                if viewModel.isGenerating {
+                    Button {
+                        viewModel.cancel()
+                    } label: {
+                        Label("Stop", systemImage: "stop.fill")
+                            .labelStyle(.iconOnly)
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(SecondaryIconButtonStyle())
+                    .accessibilityLabel("Cancel generation")
                 }
-                .buttonStyle(SecondaryIconButtonStyle())
-                .disabled(!viewModel.isGenerating)
-                .accessibilityLabel("Cancel generation")
             }
         }
         .panel()
+        .onChange(of: voiceTranscriber.transcript) { _, newValue in
+            guard !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return
+            }
+            viewModel.inputKind = .voiceNote
+            viewModel.inputText = newValue
+        }
+    }
+}
+
+private struct CaptureKindChip: View {
+    var kind: AssistantInputKind
+    var isSelected: Bool
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(kind.shortTitle, systemImage: kind.symbol)
+                .font(.system(.caption, design: .rounded, weight: .bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 9)
+                .foregroundStyle(isSelected ? .white : LocalAssistColors.ink)
+                .background(isSelected ? LocalAssistColors.accent : LocalAssistColors.row, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Capture as \(kind.shortTitle)")
+    }
+}
+
+private struct CompactVoiceStatusView: View {
+    @ObservedObject var transcriber: VoiceNoteTranscriber
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: statusIcon)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(statusColor)
+                .frame(width: 30, height: 30)
+                .background(statusColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(statusTitle)
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                Text(statusDetail)
+                    .font(.system(.caption, design: .rounded, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 0)
+
+            if transcriber.isRecording {
+                VoiceLevelBars()
+            }
+        }
+        .padding(10)
+        .background(LocalAssistColors.row, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var statusIcon: String {
+        if transcriber.errorMessage != nil {
+            return "exclamationmark.triangle.fill"
+        }
+        return transcriber.isRecording ? "waveform" : "mic.fill"
+    }
+
+    private var statusColor: Color {
+        if transcriber.errorMessage != nil {
+            return LocalAssistColors.warning
+        }
+        return transcriber.isRecording ? LocalAssistColors.danger : LocalAssistColors.accent
+    }
+
+    private var statusTitle: String {
+        if transcriber.errorMessage != nil {
+            return "Voice needs attention"
+        }
+        switch transcriber.state {
+        case .idle:
+            return transcriber.transcript.isEmpty ? "Voice note" : "Transcript ready"
+        case .requestingPermission:
+            return "Requesting access"
+        case .recording:
+            return "Listening"
+        case .unavailable:
+            return "Voice unavailable"
+        }
+    }
+
+    private var statusDetail: String {
+        if let message = transcriber.errorMessage {
+            return message
+        }
+        if transcriber.isRecording {
+            return "Speak naturally. Your transcript will appear in the capture box."
+        }
+        if transcriber.transcript.isEmpty {
+            return "Tap the mic to dictate instead of typing."
+        }
+        return "Edit the transcript, then review the suggested actions."
+    }
+}
+
+private struct VoiceCaptureView: View {
+    @ObservedObject var transcriber: VoiceNoteTranscriber
+    var isGenerating: Bool
+    var onTranscriptChanged: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 14) {
+                Button {
+                    if transcriber.isRecording {
+                        transcriber.stop()
+                    } else {
+                        Task {
+                            await transcriber.start()
+                        }
+                    }
+                } label: {
+                    Image(systemName: transcriber.isRecording ? "stop.fill" : "mic.fill")
+                        .font(.system(size: 26, weight: .bold))
+                        .frame(width: 74, height: 74)
+                }
+                .buttonStyle(VoiceButtonStyle(isRecording: transcriber.isRecording))
+                .disabled(isGenerating || transcriber.state == .requestingPermission)
+                .accessibilityLabel(transcriber.isRecording ? "Stop voice note" : "Record voice note")
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(voiceStatusTitle)
+                        .font(.system(.headline, design: .rounded, weight: .bold))
+                    Text(voiceStatusDetail)
+                        .font(.system(.subheadline, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if transcriber.isRecording {
+                        VoiceLevelBars()
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            if let message = transcriber.errorMessage {
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(.caption, design: .rounded, weight: .medium))
+                    .foregroundStyle(LocalAssistColors.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if !transcriber.transcript.isEmpty {
+                Text(transcriber.transcript)
+                    .font(.system(.caption, design: .rounded, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(LocalAssistColors.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+        }
+        .padding(14)
+        .background(LocalAssistColors.row, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .onChange(of: transcriber.transcript) { _, newValue in
+            guard !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return
+            }
+            onTranscriptChanged(newValue)
+        }
+    }
+
+    private var voiceStatusTitle: String {
+        switch transcriber.state {
+        case .idle:
+            "Voice note"
+        case .requestingPermission:
+            "Requesting access"
+        case .recording:
+            "Listening"
+        case .unavailable:
+            "Voice unavailable"
+        }
+    }
+
+    private var voiceStatusDetail: String {
+        switch transcriber.state {
+        case .idle:
+            "Tap the mic, speak naturally, then review the transcript before creating a brief."
+        case .requestingPermission:
+            "Waiting for microphone and speech recognition access."
+        case .recording:
+            "Speak your thought, meeting recap, or task list."
+        case .unavailable:
+            "You can still type or paste the transcript."
+        }
+    }
+}
+
+private struct VoiceLevelBars: View {
+    private let heights: [CGFloat] = [8, 16, 24, 14, 20]
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 4) {
+            ForEach(Array(heights.enumerated()), id: \.offset) { _, height in
+                Capsule()
+                    .fill(LocalAssistColors.danger.opacity(0.72))
+                    .frame(width: 4, height: height)
+            }
+        }
+        .frame(height: 28, alignment: .center)
     }
 }
 
@@ -194,8 +624,8 @@ private struct SummaryResultView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            SectionHeader(title: "Summary", symbol: "doc.text.magnifyingglass")
-            Text(run.summary.overview)
+            SectionHeader(title: "Brief", symbol: "doc.text.magnifyingglass")
+            Text(run.summary.headline)
                 .font(.system(.title3, design: .rounded, weight: .semibold))
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -230,7 +660,9 @@ private struct SuggestionRow: View {
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 6) {
                     MetadataPill(text: suggestion.priority.rawValue.capitalized)
-                    if let dueHint = suggestion.dueHint {
+                    if let dueDate = suggestion.iso8601DueDate {
+                        MetadataPill(text: dueDate)
+                    } else if let dueHint = suggestion.dueHint {
                         MetadataPill(text: dueHint)
                     }
                     MetadataPill(text: actionLabel(for: suggestion.action))
@@ -243,18 +675,7 @@ private struct SuggestionRow: View {
     }
 
     private func actionLabel(for action: SuggestedAction) -> String {
-        switch action {
-        case .reminder:
-            "Reminder"
-        case .calendarHold:
-            "Calendar"
-        case .messageDraft:
-            "Message"
-        case .checklistItem:
-            "Checklist"
-        case .none:
-            "No action"
-        }
+        action.displayTitle
     }
 }
 
@@ -269,45 +690,272 @@ private struct MetadataPill: View {
             .minimumScaleFactor(0.8)
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
-            .background(Color.white.opacity(0.74), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(LocalAssistColors.surface.opacity(0.74), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
-private struct ActionDraftsView: View {
-    var actions: [PreparedToolAction]
+private struct RefineBarView: View {
+    @ObservedObject var viewModel: LocalAssistViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "Action drafts", symbol: "checklist.checked")
-
-            ForEach(actions) { action in
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: icon(for: action.draft.kind))
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(LocalAssistColors.accent)
-                        .frame(width: 30, height: 30)
-                        .background(LocalAssistColors.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(action.confirmationTitle)
-                            .font(.system(.headline, design: .rounded))
-                        Text(action.confirmationMessage)
-                            .font(.system(.caption, design: .rounded))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHeader(title: "Refine on the same session", symbol: "arrow.triangle.2.circlepath")
+            HStack(spacing: 10) {
+                TextField("e.g. only keep high-priority tasks", text: $viewModel.refineInstruction)
+                    .font(.system(.subheadline, design: .rounded))
+                    .textFieldStyle(.plain)
+                    .padding(10)
+                    .background(LocalAssistColors.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(LocalAssistColors.border)
                     }
-                    Spacer(minLength: 0)
-                    Image(systemName: action.state == .readyForConfirmation ? "hand.tap.fill" : "checkmark")
-                        .foregroundStyle(.secondary)
+                    .onSubmit { viewModel.refine() }
+
+                Button {
+                    viewModel.refine()
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 24))
                 }
-                .padding(12)
-                .background(Color.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(LocalAssistColors.border)
+                .buttonStyle(.plain)
+                .foregroundStyle(LocalAssistColors.accent)
+                .disabled(
+                    viewModel.isGenerating
+                        || viewModel.refineInstruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
+                .accessibilityLabel("Refine summary")
+            }
+            Text("Follow-ups reuse the model session, so the previous note and summary stay in context.")
+                .font(.system(.caption, design: .rounded))
+                .foregroundStyle(.secondary)
+        }
+        .panel()
+    }
+}
+
+private struct ActionReviewView: View {
+    var actions: [PreparedToolAction]
+    var executed: [String: ExecutedToolAction]
+    var onConfirm: (PreparedToolAction) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 5) {
+                SectionHeader(title: "Review next actions", symbol: "checklist.checked")
+                Text("Edit anything first. Nothing is added until you confirm.")
+                    .font(.system(.caption, design: .rounded, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            if actions.isEmpty {
+                Label("No actions need review from this capture.", systemImage: "checkmark.circle")
+                    .font(.system(.subheadline, design: .rounded))
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(actions) { action in
+                    EditableActionCard(
+                        action: action,
+                        result: executed[action.id],
+                        onConfirm: onConfirm
+                    )
                 }
             }
         }
         .panel()
+    }
+}
+
+private struct EditableActionCard: View {
+    var action: PreparedToolAction
+    var result: ExecutedToolAction?
+    var onConfirm: (PreparedToolAction) -> Void
+
+    @State private var kind: SuggestedAction
+    @State private var title: String
+    @State private var dateText: String
+    @State private var notes: String
+    @State private var isIgnored = false
+
+    init(
+        action: PreparedToolAction,
+        result: ExecutedToolAction?,
+        onConfirm: @escaping (PreparedToolAction) -> Void
+    ) {
+        self.action = action
+        self.result = result
+        self.onConfirm = onConfirm
+        _kind = State(initialValue: action.draft.kind == .none ? .reminder : action.draft.kind)
+        _title = State(initialValue: Self.initialTitle(for: action))
+        _dateText = State(initialValue: Self.initialDate(for: action))
+        _notes = State(initialValue: Self.initialNotes(for: action))
+    }
+
+    var body: some View {
+        if isIgnored {
+            HStack(spacing: 10) {
+                Image(systemName: "minus.circle.fill")
+                    .foregroundStyle(.secondary)
+                Text("Ignored")
+                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Undo") {
+                    isIgnored = false
+                }
+                .font(.system(.caption, design: .rounded, weight: .bold))
+            }
+            .padding(12)
+            .background(LocalAssistColors.row, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: icon(for: kind))
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(LocalAssistColors.accent)
+                        .frame(width: 38, height: 38)
+                        .background(LocalAssistColors.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(kind.displayTitle)
+                                .font(.system(.caption, design: .rounded, weight: .bold))
+                                .foregroundStyle(.secondary)
+                            Spacer(minLength: 8)
+                            Picker("Action type", selection: $kind) {
+                                ForEach(SuggestedAction.reviewCases, id: \.self) { actionKind in
+                                    Text(actionKind.displayTitle).tag(actionKind)
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                        }
+
+                        TextField("Action title", text: $title, axis: .vertical)
+                            .font(.system(.headline, design: .rounded, weight: .semibold))
+                            .textFieldStyle(.plain)
+                            .lineLimit(1 ... 3)
+                    }
+                }
+
+                VStack(spacing: 8) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "calendar")
+                            .foregroundStyle(.secondary)
+                            .frame(width: 20)
+                        TextField("Date or reminder time", text: $dateText)
+                            .textFieldStyle(.plain)
+                    }
+
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "note.text")
+                            .foregroundStyle(.secondary)
+                            .frame(width: 20)
+                            .padding(.top, 2)
+                        TextField("Notes", text: $notes, axis: .vertical)
+                            .textFieldStyle(.plain)
+                            .lineLimit(1 ... 3)
+                    }
+                }
+                .font(.system(.subheadline, design: .rounded))
+                .padding(11)
+                .background(LocalAssistColors.row, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                if let result {
+                    Label(result.detail, systemImage: result.didWriteToSystem ? "checkmark.seal.fill" : "info.circle")
+                        .font(.system(.caption, design: .rounded, weight: .semibold))
+                        .foregroundStyle(result.didWriteToSystem ? LocalAssistColors.success : .secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    HStack(spacing: 10) {
+                        Button {
+                            isIgnored = true
+                        } label: {
+                            Text("Ignore")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(SecondaryActionButtonStyle())
+
+                        if kind != .none {
+                            Button {
+                                onConfirm(editedAction)
+                            } label: {
+                                Label(confirmLabel(for: kind), systemImage: "checkmark.circle.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(PrimaryButtonStyle())
+                            .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                    }
+                }
+            }
+            .padding(12)
+            .background(LocalAssistColors.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(LocalAssistColors.border)
+            }
+        }
+    }
+
+    private var editedAction: PreparedToolAction {
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanDate = dateText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        var payload = action.draft.payload
+
+        payload["title"] = cleanTitle
+        payload["subject"] = cleanTitle
+
+        if cleanDate.isEmpty {
+            payload.removeValue(forKey: "dueHint")
+            payload.removeValue(forKey: "dueDate")
+            payload.removeValue(forKey: "dateHint")
+            payload.removeValue(forKey: "date")
+        } else if kind == .calendarHold {
+            payload["dateHint"] = cleanDate
+        } else {
+            payload["dueHint"] = cleanDate
+        }
+
+        if cleanNotes.isEmpty {
+            payload.removeValue(forKey: "notes")
+            payload.removeValue(forKey: "body")
+        } else {
+            payload["notes"] = cleanNotes
+            payload["body"] = cleanNotes
+        }
+
+        if kind == .calendarHold, payload["duration"] == nil {
+            payload["duration"] = "30m"
+        }
+
+        let draft = ToolActionDraft(
+            kind: kind,
+            title: kind.reviewTitle,
+            payload: payload,
+            requiresConfirmation: kind != .none
+        )
+        return PreparedToolAction(
+            id: action.id,
+            draft: draft,
+            state: kind == .none ? .noActionRequired : .readyForConfirmation,
+            confirmationTitle: kind.reviewTitle,
+            confirmationMessage: "Reviewed in local assist."
+        )
+    }
+
+    private func confirmLabel(for kind: SuggestedAction) -> String {
+        switch kind {
+        case .reminder, .checklistItem:
+            "Add to Reminders"
+        case .calendarHold:
+            "Add to Calendar"
+        case .messageDraft:
+            "Prepare Message"
+        case .none:
+            "Confirm"
+        }
     }
 
     private func icon(for action: SuggestedAction) -> String {
@@ -324,42 +972,25 @@ private struct ActionDraftsView: View {
             "minus.circle"
         }
     }
-}
 
-private struct MetricsView: View {
-    var metrics: RunMetrics
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "Run metrics", symbol: "speedometer")
-            HStack(spacing: 10) {
-                MetricTile(title: "Latency", value: "\(metrics.durationMilliseconds.formatted(.number.precision(.fractionLength(1)))) ms")
-                MetricTile(title: "Source", value: metrics.source == .foundationModels ? "Model" : "Fallback")
-                MetricTile(title: "Drafts", value: "\(metrics.actionDraftCount)")
-            }
-        }
-        .panel()
+    private static func initialTitle(for action: PreparedToolAction) -> String {
+        action.draft.payload["title"]
+            ?? action.draft.payload["subject"]
+            ?? action.confirmationTitle
     }
-}
 
-private struct AggregateMetricsView: View {
-    var metrics: AggregateRunMetrics
+    private static func initialDate(for action: PreparedToolAction) -> String {
+        action.draft.payload["dueDate"]
+            ?? action.draft.payload["date"]
+            ?? action.draft.payload["dueHint"]
+            ?? action.draft.payload["dateHint"]
+            ?? ""
+    }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "Performance", symbol: "chart.xyaxis.line")
-            HStack(spacing: 10) {
-                MetricTile(title: "Runs", value: "\(metrics.runCount)")
-                MetricTile(title: "p50", value: "\(metrics.latencyMilliseconds.p50.formatted(.number.precision(.fractionLength(1)))) ms")
-                MetricTile(title: "p95", value: "\(metrics.latencyMilliseconds.p95.formatted(.number.precision(.fractionLength(1)))) ms")
-            }
-            HStack(spacing: 10) {
-                MetricTile(title: "Model", value: "\(metrics.foundationModelRuns)")
-                MetricTile(title: "Fallback", value: "\(metrics.fallbackRuns)")
-                MetricTile(title: "Avg drafts", value: metrics.averageActionDrafts.formatted(.number.precision(.fractionLength(1))))
-            }
-        }
-        .panel()
+    private static func initialNotes(for action: PreparedToolAction) -> String {
+        action.draft.payload["notes"]
+            ?? action.draft.payload["body"]
+            ?? ""
     }
 }
 
@@ -368,19 +999,19 @@ private struct RunHistoryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "Recent runs", symbol: "clock.arrow.circlepath")
+            SectionHeader(title: "Recent briefs", symbol: "clock.arrow.circlepath")
 
             ForEach(runs.prefix(5), id: \.metrics.startedAt) { run in
                 HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: run.summary.source == .foundationModels ? "bolt.circle.fill" : "wifi.slash")
-                        .foregroundStyle(run.summary.source == .foundationModels ? LocalAssistColors.success : LocalAssistColors.warning)
+                    Image(systemName: run.request.inputKind.symbol)
+                        .foregroundStyle(LocalAssistColors.accent)
                         .frame(width: 28, height: 28)
 
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(run.summary.overview)
+                        Text(run.summary.headline)
                             .font(.system(.subheadline, design: .rounded, weight: .semibold))
                             .lineLimit(2)
-                        Text("\(run.metrics.durationMilliseconds.formatted(.number.precision(.fractionLength(1)))) ms · \(run.metrics.suggestionCount) tasks · \(run.metrics.actionDraftCount) drafts")
+                        Text(historyDetail(for: run))
                             .font(.system(.caption, design: .rounded, weight: .semibold))
                             .foregroundStyle(.secondary)
                     }
@@ -388,7 +1019,7 @@ private struct RunHistoryView: View {
                     Spacer(minLength: 0)
                 }
                 .padding(12)
-                .background(Color.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(LocalAssistColors.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .stroke(LocalAssistColors.border)
@@ -397,42 +1028,18 @@ private struct RunHistoryView: View {
         }
         .panel()
     }
-}
 
-private struct MetricTile: View {
-    var title: String
-    var value: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.system(.caption, design: .rounded, weight: .semibold))
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.system(.headline, design: .rounded, weight: .bold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
+    private func historyDetail(for run: AssistantRun) -> String {
+        let kind = run.request.inputKind.shortTitle
+        let count = run.summary.tasks.count
+        switch count {
+        case 0:
+            return kind
+        case 1:
+            return "\(kind) · 1 task"
+        default:
+            return "\(kind) · \(count) tasks"
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(LocalAssistColors.row, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
-}
-
-private struct AvailabilityBadge: View {
-    var availability: ModelAvailability?
-
-    var body: some View {
-        let available = availability?.isAvailable == true
-        Label(available ? "Ready" : "Offline", systemImage: available ? "bolt.circle.fill" : "wifi.slash")
-            .font(.system(.caption, design: .rounded, weight: .bold))
-            .foregroundStyle(available ? LocalAssistColors.success : LocalAssistColors.warning)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(Color.white, in: Capsule())
-            .overlay {
-                Capsule().stroke(LocalAssistColors.border)
-            }
     }
 }
 
@@ -468,10 +1075,12 @@ private struct PriorityDot: View {
     }
 }
 
+/// Typed streaming skeleton: headline first, then key points and
+/// suggestion titles fill in as the model generates.
 private struct ProgressPanel: View {
     var phase: SummaryGenerationPhase?
     var message: String?
-    var partialText: String
+    var partial: StructuredSummaryPartial?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -480,22 +1089,39 @@ private struct ProgressPanel: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(phaseTitle)
                         .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                    if let message {
-                        Text(message)
-                            .font(.system(.caption, design: .rounded, weight: .medium))
-                            .foregroundStyle(.secondary)
-                    }
+                    Text("Pulling out the useful pieces.")
+                        .font(.system(.caption, design: .rounded, weight: .medium))
+                        .foregroundStyle(.secondary)
                 }
                 Spacer()
             }
 
-            if !partialText.isEmpty {
-                Text(partialText)
-                    .font(.system(.caption, design: .monospaced))
-                    .lineLimit(5)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(LocalAssistColors.row, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            if let partial {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let headline = partial.overview, !headline.isEmpty {
+                        Text(headline)
+                            .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    ForEach(partial.keyPoints, id: \.self) { point in
+                        Label(point, systemImage: "circle.dotted")
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(Array(partial.suggestions.enumerated()), id: \.offset) { _, suggestion in
+                        if let title = suggestion.title, !title.isEmpty {
+                            Label {
+                                Text("\(title)\(dueText(for: suggestion))")
+                            } icon: {
+                                Image(systemName: "arrow.right.circle")
+                            }
+                            .font(.system(.caption, design: .rounded, weight: .medium))
+                        }
+                    }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(LocalAssistColors.row, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
         }
         .panel()
@@ -504,22 +1130,30 @@ private struct ProgressPanel: View {
     private var phaseTitle: String {
         switch phase {
         case .validating:
-            "Validating"
+            "Reading input"
         case .checkingAvailability:
-            "Checking model"
+            "Preparing brief"
         case .fallback:
-            "Using fallback"
-        case .buildingPrompt:
-            "Preparing prompt"
+            "Finding actions"
         case .streamingModel:
-            "Streaming locally"
-        case .decoding:
-            "Validating output"
+            "Writing brief"
+        case .normalizing:
+            "Organizing tasks"
         case .completed:
-            "Finishing"
+            "Finishing up"
         case nil:
-            "Generating locally"
+            "Creating brief"
         }
+    }
+
+    private func dueText(for suggestion: TaskSuggestionPartial) -> String {
+        if let dueDate = suggestion.dueDate {
+            return " · \(ISO8601DateFormatter().string(from: dueDate))"
+        }
+        if let dueHint = suggestion.dueHint {
+            return " · \(dueHint)"
+        }
+        return ""
     }
 }
 
@@ -546,12 +1180,37 @@ private struct StatusPanel: View {
 }
 
 private struct PrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(.headline, design: .rounded, weight: .bold))
-            .foregroundStyle(.white)
+            .foregroundStyle(.white.opacity(isEnabled ? 1 : 0.72))
             .padding(.vertical, 13)
-            .background(configuration.isPressed ? LocalAssistColors.accent.opacity(0.78) : LocalAssistColors.accent, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(background(configuration), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func background(_ configuration: Configuration) -> Color {
+        guard isEnabled else {
+            return LocalAssistColors.accent.opacity(0.34)
+        }
+        return configuration.isPressed ? LocalAssistColors.accent.opacity(0.78) : LocalAssistColors.accent
+    }
+}
+
+private struct SecondaryActionButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(.headline, design: .rounded, weight: .bold))
+            .foregroundStyle(LocalAssistColors.ink.opacity(isEnabled ? 1 : 0.45))
+            .padding(.vertical, 13)
+            .background(configuration.isPressed ? LocalAssistColors.row.opacity(0.72) : LocalAssistColors.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(LocalAssistColors.border)
+            }
     }
 }
 
@@ -560,18 +1219,40 @@ private struct SecondaryIconButtonStyle: ButtonStyle {
         configuration.label
             .font(.system(size: 16, weight: .bold))
             .foregroundStyle(LocalAssistColors.ink)
-            .background(configuration.isPressed ? LocalAssistColors.row.opacity(0.7) : Color.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(configuration.isPressed ? LocalAssistColors.row.opacity(0.7) : LocalAssistColors.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .stroke(LocalAssistColors.border)
             }
+    }
+}
+
+private struct VoiceButtonStyle: ButtonStyle {
+    var isRecording: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 18, weight: .bold))
+            .foregroundStyle(isRecording ? .white : LocalAssistColors.accent)
+            .background(background(configuration), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(isRecording ? Color.clear : LocalAssistColors.border)
+            }
+    }
+
+    private func background(_ configuration: Configuration) -> Color {
+        if isRecording {
+            return configuration.isPressed ? LocalAssistColors.danger.opacity(0.78) : LocalAssistColors.danger
+        }
+        return configuration.isPressed ? LocalAssistColors.row.opacity(0.7) : LocalAssistColors.surface
     }
 }
 
 private extension View {
     func panel() -> some View {
         padding(16)
-            .background(Color.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(LocalAssistColors.surface.opacity(0.92), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .stroke(LocalAssistColors.border)
@@ -579,11 +1260,195 @@ private extension View {
     }
 }
 
+private extension AssistantInputKind {
+    var shortTitle: String {
+        switch self {
+        case .note:
+            "Notes"
+        case .voiceNote:
+            "Voice"
+        case .meeting:
+            "Meeting"
+        case .personalAdmin:
+            "Admin"
+        }
+    }
+
+    var sourceTitle: String {
+        switch self {
+        case .note:
+            "Source notes"
+        case .voiceNote:
+            "Voice transcript"
+        case .meeting:
+            "Meeting notes"
+        case .personalAdmin:
+            "Admin notes"
+        }
+    }
+
+    var placeholder: String {
+        switch self {
+        case .note:
+            "Paste notes, reminders, or scattered thoughts..."
+        case .voiceNote:
+            "Tap the mic to dictate, or edit the transcript here..."
+        case .meeting:
+            "Paste meeting notes, decisions, owners, and open questions..."
+        case .personalAdmin:
+            "Add errands, appointments, bills, calls, renewals, or household follow-ups..."
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .note:
+            "text.alignleft"
+        case .voiceNote:
+            "mic.fill"
+        case .meeting:
+            "person.2.fill"
+        case .personalAdmin:
+            "checklist"
+        }
+    }
+}
+
+private extension SuggestedAction {
+    static var reviewCases: [SuggestedAction] {
+        [.reminder, .calendarHold, .messageDraft, .checklistItem, .none]
+    }
+
+    var displayTitle: String {
+        switch self {
+        case .reminder:
+            "Reminder"
+        case .calendarHold:
+            "Calendar"
+        case .messageDraft:
+            "Message"
+        case .checklistItem:
+            "Checklist"
+        case .none:
+            "No action"
+        }
+    }
+
+    var reviewTitle: String {
+        switch self {
+        case .reminder:
+            "Create reminder"
+        case .calendarHold:
+            "Create calendar hold"
+        case .messageDraft:
+            "Prepare message draft"
+        case .checklistItem:
+            "Add checklist item"
+        case .none:
+            "No action"
+        }
+    }
+}
+
+private struct SettingsSheetView: View {
+    @ObservedObject var viewModel: LocalAssistViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Toggle(isOn: smartModeBinding) {
+                        Label("Smart brief (on-device AI)", systemImage: "brain.head.profile")
+                    }
+                } header: {
+                    Text("Processing")
+                } footer: {
+                    Text("Both modes run entirely on this phone. Smart uses Apple's on-device model for richer briefs; Instant uses deterministic rules and works on every device — even with the model unavailable.")
+                }
+
+                Section {
+                    Toggle(isOn: morningBriefBinding) {
+                        Label("Morning brief at 8:30", systemImage: "sun.max.fill")
+                    }
+                } header: {
+                    Text("Daily moment")
+                } footer: {
+                    Text("One local notification each morning with what's due today and what you captured yesterday. Scheduled on device — nothing is sent anywhere.")
+                }
+
+                Section {
+                    Button {
+                        viewModel.clearDraft()
+                        dismiss()
+                    } label: {
+                        Label("Clear current draft", systemImage: "xmark.circle")
+                    }
+                    Button(role: .destructive) {
+                        viewModel.clearHistory()
+                        dismiss()
+                    } label: {
+                        Label("Clear history", systemImage: "trash")
+                    }
+                } header: {
+                    Text("Data")
+                } footer: {
+                    Text("History lives in a private JSON file in the app's container.")
+                }
+            }
+            .navigationTitle("Settings")
+            #if os(iOS)
+                .navigationBarTitleDisplayMode(.inline)
+            #endif
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") {
+                            dismiss()
+                        }
+                    }
+                }
+        }
+    }
+
+    private var smartModeBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.usesSmartModel },
+            set: { newValue in
+                if newValue != viewModel.usesSmartModel {
+                    viewModel.toggleSmartMode()
+                }
+            }
+        )
+    }
+
+    private var morningBriefBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.morningBriefEnabled },
+            set: { viewModel.setMorningBrief(enabled: $0) }
+        )
+    }
+}
+
 private enum LocalAssistColors {
-    static let canvas = Color(red: 0.965, green: 0.968, blue: 0.955)
-    static let row = Color(red: 0.944, green: 0.957, blue: 0.964)
-    static let border = Color(red: 0.835, green: 0.858, blue: 0.866)
-    static let ink = Color(red: 0.105, green: 0.125, blue: 0.145)
+    #if canImport(UIKit)
+        static let canvas = Color(uiColor: .systemGroupedBackground)
+        static let surface = Color(uiColor: .secondarySystemGroupedBackground)
+        static let row = Color(uiColor: .tertiarySystemGroupedBackground)
+        static let border = Color(uiColor: .separator)
+        static let ink = Color(uiColor: .label)
+    #elseif canImport(AppKit)
+        static let canvas = Color(nsColor: .windowBackgroundColor)
+        static let surface = Color(nsColor: .controlBackgroundColor)
+        static let row = Color(nsColor: .underPageBackgroundColor)
+        static let border = Color(nsColor: .separatorColor)
+        static let ink = Color(nsColor: .labelColor)
+    #else
+        static let canvas = Color(.white)
+        static let surface = Color(.white)
+        static let row = Color(red: 0.944, green: 0.957, blue: 0.964)
+        static let border = Color(red: 0.835, green: 0.858, blue: 0.866)
+        static let ink = Color(red: 0.105, green: 0.125, blue: 0.145)
+    #endif
     static let accent = Color(red: 0.055, green: 0.376, blue: 0.839)
     static let success = Color(red: 0.067, green: 0.482, blue: 0.286)
     static let warning = Color(red: 0.744, green: 0.432, blue: 0.063)

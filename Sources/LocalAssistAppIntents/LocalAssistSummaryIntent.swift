@@ -2,11 +2,12 @@ import AppIntents
 import LocalAssistCore
 import LocalAssistFoundationModels
 
-@available(macOS 13.0, iOS 16.0, *)
 public struct LocalAssistSummaryIntent: AppIntent {
-    public static let title: LocalizedStringResource = "Summarize with LocalAssist"
+    public static let title: LocalizedStringResource = "Summarize My Notes"
     public static let description = IntentDescription(
-        "Generate a private on-device summary with suggested follow-up tasks."
+        "Generate a private on-device summary with suggested follow-up tasks.",
+        categoryName: "Summaries",
+        resultValueName: "Summary"
     )
 
     @Parameter(title: "Text")
@@ -22,11 +23,24 @@ public struct LocalAssistSummaryIntent: AppIntent {
         self.maxSuggestions = maxSuggestions
     }
 
-    public func perform() async throws -> some IntentResult & ReturnsValue<String> {
+    public func perform() async throws -> some IntentResult & ReturnsValue<AssistantRunEntity> & ProvidesDialog {
         let service = LocalAssistLiveFactory.makeService()
-        let summary = try await service.summarize(
+        let run = try await service.summarizeWithMetrics(
             AssistantRequest(sourceText: text, maxSuggestions: maxSuggestions)
         )
-        return .result(value: SummaryFormatter.plainText(summary))
+
+        // Persist so the entity is queryable later and shows up in history.
+        if let store = RunHistoryStore.applicationSupportOrNil() {
+            _ = try? await store.append(run)
+        }
+
+        let entity = AssistantRunEntity(run: run)
+        return .result(
+            value: entity,
+            dialog: IntentDialog(
+                full: "\(run.summary.headline) I found \(run.summary.tasks.count) follow-up tasks.",
+                supporting: "Summarized privately on device."
+            )
+        )
     }
 }

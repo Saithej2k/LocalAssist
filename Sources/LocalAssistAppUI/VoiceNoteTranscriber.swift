@@ -1,0 +1,222 @@
+import Combine
+import Foundation
+
+#if os(iOS) && canImport(AVFoundation) && canImport(Speech)
+    import AVFoundation
+    import Speech
+#endif
+
+public enum VoiceCaptureState: Equatable {
+    case idle
+    case requestingPermission
+    case recording
+    case unavailable(String)
+
+    public var isRecording: Bool {
+        self == .recording
+    }
+}
+
+#if os(iOS) && canImport(AVFoundation) && canImport(Speech)
+    @MainActor
+    public final class VoiceNoteTranscriber: ObservableObject {
+        @Published public private(set) var state: VoiceCaptureState = .idle
+        @Published public private(set) var transcript = ""
+        @Published public private(set) var errorMessage: String?
+
+        private var audioEngine: AVAudioEngine?
+        private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+        private var recognitionTask: SFSpeechRecognitionTask?
+        private var speechRecognizer: SFSpeechRecognizer?
+
+        public init() {}
+
+        public var isRecording: Bool {
+            state.isRecording
+        }
+
+        public func start(localeIdentifier: String = Locale.current.identifier) async {
+            guard !isRecording else {
+                return
+            }
+
+            state = .requestingPermission
+            transcript = ""
+            errorMessage = nil
+
+            do {
+                try await requestPermissions()
+                try startAudioRecognition(localeIdentifier: localeIdentifier)
+                state = .recording
+            } catch {
+                stopAudio(cancelRecognition: true)
+                let message = (error as? VoiceCaptureError)?.description ?? error.localizedDescription
+                errorMessage = message
+                state = .unavailable(message)
+            }
+        }
+
+        public func stop() {
+            guard isRecording || state == .requestingPermission else {
+                return
+            }
+
+            stopAudio(cancelRecognition: false)
+            state = .idle
+        }
+
+        private func requestPermissions() async throws {
+            switch await speechAuthorizationStatus() {
+            case .authorized:
+                break
+            case .denied:
+                throw VoiceCaptureError.speechDenied
+            case .restricted:
+                throw VoiceCaptureError.speechRestricted
+            case .notDetermined:
+                throw VoiceCaptureError.speechDenied
+            @unknown default:
+                throw VoiceCaptureError.speechDenied
+            }
+
+            guard await microphoneAccessGranted() else {
+                throw VoiceCaptureError.microphoneDenied
+            }
+        }
+
+        private func speechAuthorizationStatus() async -> SFSpeechRecognizerAuthorizationStatus {
+            await withCheckedContinuation { continuation in
+                SFSpeechRecognizer.requestAuthorization { status in
+                    continuation.resume(returning: status)
+                }
+            }
+        }
+
+        private func microphoneAccessGranted() async -> Bool {
+            await withCheckedContinuation { continuation in
+                AVAudioSession.sharedInstance().requestRecordPermission { allowed in
+                    continuation.resume(returning: allowed)
+                }
+            }
+        }
+
+        private func startAudioRecognition(localeIdentifier: String) throws {
+            stopAudio(cancelRecognition: true)
+
+            let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeIdentifier))
+            guard let recognizer else {
+                throw VoiceCaptureError.recognizerUnavailable
+            }
+            guard recognizer.isAvailable else {
+                throw VoiceCaptureError.recognizerUnavailable
+            }
+            guard recognizer.supportsOnDeviceRecognition else {
+                throw VoiceCaptureError.onDeviceRecognitionUnavailable
+            }
+
+            let request = SFSpeechAudioBufferRecognitionRequest()
+            request.shouldReportPartialResults = true
+            request.requiresOnDeviceRecognition = true
+            request.addsPunctuation = true
+
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.record, mode: .measurement, options: [.duckOthers])
+            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+
+            let engine = AVAudioEngine()
+            let inputNode = engine.inputNode
+            let recordingFormat = inputNode.outputFormat(forBus: 0)
+            inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak request] buffer, _ in
+                request?.append(buffer)
+            }
+
+            engine.prepare()
+            try engine.start()
+
+            speechRecognizer = recognizer
+            audioEngine = engine
+            recognitionRequest = request
+            recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+                Task { @MainActor [weak self] in
+                    guard let self else {
+                        return
+                    }
+
+                    if let result {
+                        transcript = result.bestTranscription.formattedString
+                        if result.isFinal {
+                            stop()
+                        }
+                    }
+
+                    if let error, isRecording {
+                        stopAudio(cancelRecognition: true)
+                        errorMessage = error.localizedDescription
+                        state = .unavailable(error.localizedDescription)
+                    }
+                }
+            }
+        }
+
+        private func stopAudio(cancelRecognition: Bool) {
+            if audioEngine?.isRunning == true {
+                audioEngine?.stop()
+            }
+            audioEngine?.inputNode.removeTap(onBus: 0)
+            recognitionRequest?.endAudio()
+            if cancelRecognition {
+                recognitionTask?.cancel()
+            }
+            recognitionTask = nil
+            recognitionRequest = nil
+            audioEngine = nil
+            speechRecognizer = nil
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
+    }
+
+    private enum VoiceCaptureError: Error, CustomStringConvertible {
+        case microphoneDenied
+        case speechDenied
+        case speechRestricted
+        case recognizerUnavailable
+        case onDeviceRecognitionUnavailable
+
+        var description: String {
+            switch self {
+            case .microphoneDenied:
+                "Microphone access is off for LocalAssist."
+            case .speechDenied:
+                "Speech recognition access is off for LocalAssist."
+            case .speechRestricted:
+                "Speech recognition is restricted on this device."
+            case .recognizerUnavailable:
+                "Speech recognition is unavailable for the current language."
+            case .onDeviceRecognitionUnavailable:
+                "On-device speech recognition is unavailable for the current language."
+            }
+        }
+    }
+#else
+    @MainActor
+    public final class VoiceNoteTranscriber: ObservableObject {
+        @Published public private(set) var state: VoiceCaptureState = .unavailable("Voice capture requires iPhone.")
+        @Published public private(set) var transcript = ""
+        @Published public private(set) var errorMessage: String? = "Voice capture requires iPhone."
+
+        public init() {}
+
+        public var isRecording: Bool {
+            false
+        }
+
+        public func start(localeIdentifier _: String = Locale.current.identifier) async {
+            errorMessage = "Voice capture requires iPhone."
+            state = .unavailable("Voice capture requires iPhone.")
+        }
+
+        public func stop() {
+            state = .idle
+        }
+    }
+#endif
