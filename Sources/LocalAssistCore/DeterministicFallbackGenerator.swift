@@ -2,25 +2,66 @@ import Foundation
 
 public struct DeterministicFallbackGenerator: Sendable {
     private let planner: ToolActionPlanner
+    private let clock: GenerationClock
+    private let dateParser: DueDateParser
+    private let calendar: Calendar
 
-    public init(planner: ToolActionPlanner = ToolActionPlanner()) {
+    public init(
+        planner: ToolActionPlanner = ToolActionPlanner(),
+        clock: GenerationClock = .system,
+        calendar: Calendar = .current
+    ) {
         self.planner = planner
+        self.clock = clock
+        self.calendar = calendar
+        dateParser = DueDateParser(calendar: calendar)
     }
 
     public func generate(
         for request: AssistantRequest,
         reason: String,
-        generatedAt: Date = Date()
+        generatedAt: Date? = nil
+    ) async throws -> StructuredSummary {
+        try await generate(
+            for: request,
+            unavailability: ModelUnavailability(reason: .other, detail: reason),
+            generatedAt: generatedAt
+        )
+    }
+
+    public func generate(
+        for request: AssistantRequest,
+        unavailability: ModelUnavailability,
+        generatedAt: Date? = nil
+    ) async throws -> StructuredSummary {
+        try await generate(
+            for: request,
+            availability: .unavailable(unavailability),
+            fallbackReason: unavailability.detail,
+            generatedAt: generatedAt
+        )
+    }
+
+    public func generate(
+        for request: AssistantRequest,
+        availability: ModelAvailability,
+        fallbackReason: String,
+        generatedAt: Date? = nil
     ) async throws -> StructuredSummary {
         try Task.checkCancellation()
+        let referenceDate = generatedAt ?? clock.now()
 
         let text = request.sourceText.normalizedWhitespace()
         let clauses = TextSegments.taskClauses(in: text)
         let sentences = TextSegments.sentences(in: text)
 
-        let overview = makeOverview(from: sentences, fallback: text)
+        let overview = makeOverview(from: sentences, clauses: clauses, fallback: text)
         let keyPoints = makeKeyPoints(from: sentences, clauses: clauses, limit: 5)
-        let suggestions = try await makeSuggestions(from: clauses, request: request)
+        let suggestions = try await makeSuggestions(
+            from: clauses,
+            request: request,
+            relativeTo: referenceDate
+        )
         let drafts = suggestions.map(planner.draft(for:))
 
         return StructuredSummary(
@@ -30,38 +71,58 @@ public struct DeterministicFallbackGenerator: Sendable {
             actionDrafts: drafts,
             source: .deterministicFallback,
             diagnostics: GenerationDiagnostics(
-                availability: .unavailable(reason: reason),
-                fallbackReason: reason,
-                repairedMalformedModelOutput: false
+                availability: availability,
+                fallbackReason: fallbackReason
             ),
-            generatedAt: generatedAt
+            generatedAt: referenceDate
         )
     }
 
-    private func makeOverview(from sentences: [String], fallback: String) -> String {
-        let first = sentences.first ?? fallback
-        if first.count <= 180 {
-            return first
+    private func makeOverview(from sentences: [String], clauses: [String], fallback: String) -> String {
+        let candidates = sentences.isEmpty ? clauses : sentences
+        let selected = scored(candidates).first?.text ?? fallback
+        if selected.count <= 180 {
+            return selected
         }
-        return String(first.prefix(177)).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
+        return String(selected.prefix(177)).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
     }
 
     private func makeKeyPoints(from sentences: [String], clauses: [String], limit: Int) -> [String] {
         let preferredSegments = clauses.count > 1 ? clauses : sentences + clauses
-        let candidates = preferredSegments
-            .map { $0.cleanedBullet().sentenceCapitalized() }
+        let candidates = scored(preferredSegments)
+            .map { $0.text.cleanedBullet().sentenceCapitalized() }
             .filter { !$0.isEmpty }
 
         return Array(OrderedUnique.values(candidates).prefix(limit))
     }
 
+    private func scored(_ segments: [String]) -> [ScoredSegment] {
+        segments
+            .enumerated()
+            .map { index, text in
+                ScoredSegment(
+                    text: text.cleanedBullet().sentenceCapitalized(),
+                    score: TaskClassifier.salienceScore(for: text),
+                    index: index
+                )
+            }
+            .filter { !$0.text.isEmpty }
+            .sorted { lhs, rhs in
+                if lhs.score == rhs.score {
+                    return lhs.index < rhs.index
+                }
+                return lhs.score > rhs.score
+            }
+    }
+
     private func makeSuggestions(
         from clauses: [String],
-        request: AssistantRequest
+        request: AssistantRequest,
+        relativeTo referenceDate: Date
     ) async throws -> [TaskSuggestion] {
         var suggestions: [TaskSuggestion] = []
 
-        for clause in clauses {
+        for clause in scored(clauses).map(\.text) {
             try Task.checkCancellation()
             guard TaskClassifier.looksActionable(clause) else {
                 continue
@@ -72,7 +133,11 @@ public struct DeterministicFallbackGenerator: Sendable {
                 continue
             }
 
-            let dueHint = TaskClassifier.dueHint(in: clause)
+            var dueHint = TaskClassifier.dueHint(in: clause)
+            let dueDate = dateParser.date(from: dueHint ?? clause, relativeTo: referenceDate)
+            if dueHint == nil, let dueDate {
+                dueHint = Self.isoDate(dueDate)
+            }
             let priority = TaskClassifier.priority(in: clause, dueHint: dueHint)
             let action = TaskClassifier.action(for: clause)
 
@@ -82,6 +147,7 @@ public struct DeterministicFallbackGenerator: Sendable {
                     title: title,
                     priority: priority,
                     dueHint: dueHint,
+                    dueDate: dueDate,
                     action: action,
                     rationale: TaskClassifier.rationale(for: clause, action: action),
                     confidence: TaskClassifier.confidence(for: clause)
@@ -95,6 +161,18 @@ public struct DeterministicFallbackGenerator: Sendable {
 
         return suggestions
     }
+
+    private static func isoDate(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        return formatter.string(from: date)
+    }
+}
+
+private struct ScoredSegment: Sendable {
+    var text: String
+    var score: Int
+    var index: Int
 }
 
 private enum TextSegments {
@@ -127,10 +205,34 @@ private enum TextSegments {
 
 private enum TaskClassifier {
     private static let actionVerbs = [
-        "add", "book", "call", "check", "confirm", "create", "draft", "email",
-        "finish", "follow", "prepare", "review", "schedule", "send", "share",
-        "ship", "summarize", "update", "write"
+        "add", "ask", "assign", "book", "buy", "call", "cancel", "check",
+        "confirm", "create", "decide", "draft", "email", "finish", "follow",
+        "invite", "order", "pay", "prepare", "renew", "reschedule", "return",
+        "review", "schedule", "send", "share", "ship", "submit", "summarize",
+        "update", "write"
     ]
+    private static let urgencyCues = [
+        "urgent", "asap", "today", "tomorrow", "tonight", "deadline",
+        "blocker", "blocked", "by ", "before", "this week", "next week"
+    ]
+
+    static func salienceScore(for clause: String) -> Int {
+        let lowercased = clause.lowercased()
+        var score = 0
+        if looksActionable(clause) {
+            score += 8
+        }
+        for cue in urgencyCues where lowercased.contains(cue) {
+            score += 4
+        }
+        for verb in actionVerbs where lowercased.contains(verb) {
+            score += 2
+        }
+        if clause.count > 24 {
+            score += 1
+        }
+        return score
+    }
 
     static func looksActionable(_ clause: String) -> Bool {
         let lowercased = clause.lowercased()
@@ -198,7 +300,11 @@ private enum TaskClassifier {
         if lowercased.contains("review") || lowercased.contains("finish") || lowercased.contains("follow") {
             return .reminder
         }
-        if lowercased.contains("add") || lowercased.contains("check") || lowercased.contains("update") {
+        if lowercased.contains("add")
+            || lowercased.contains("check")
+            || lowercased.contains("update")
+            || lowercased.contains("prepare")
+            || lowercased.contains("write") {
             return .checklistItem
         }
         return .reminder

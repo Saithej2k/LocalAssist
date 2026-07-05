@@ -1,6 +1,8 @@
 import Darwin
 import Foundation
 import LocalAssistCore
+import LocalAssistEvalKit
+import LocalAssistSystemTools
 
 @main
 struct LocalAssistSelfTests {
@@ -26,18 +28,19 @@ private struct SelfTestSuite {
     mutating func run() async {
         malformedInputsThrow()
         await unavailableModelFallsBack()
-        await malformedModelOutputUsesFallback()
-        await guidedModelOutputUsesFoundationSource()
-        await streamingUpdatesExposePartialTextAndFinalSummary()
+        await guardrailViolationFallsBack()
+        await typedModelOutputUsesFoundationSource()
+        await streamingExposesTypedPartials()
         await concurrentRequestsComplete()
         await cancellationPropagates()
         await streamingCancellationPropagates()
         await offlineExecutionUsesDeterministicFallback()
         await deterministicFallbackIsStable()
         await summarizeWithMetricsCapturesRun()
-        await actionDraftsPrepareForConfirmation()
+        await executorWritesThroughRecordingStore()
         metricDistributionComputesPercentiles()
         await runHistoryStorePersistsAndAggregates()
+        await evalHarnessScoresFallback()
     }
 
     mutating func malformedInputsThrow() {
@@ -55,79 +58,77 @@ private struct SelfTestSuite {
 
     mutating func unavailableModelFallsBack() async {
         do {
-            let model = StaticLanguageModelClient(
-                state: .unavailable(reason: "device not eligible"),
-                response: "{}"
+            let model = StaticStructuredModelClient(
+                state: .unavailable(ModelUnavailability(reason: .deviceNotEligible))
             )
-            let service = LocalAssistService(primaryModel: model)
+            let service = LocalAssistService(model: model)
             let summary = try await service.summarize(
                 AssistantRequest(sourceText: "Review the launch checklist by Friday.")
             )
             expect(summary.source == .deterministicFallback, "unavailable model falls back")
-            expect(summary.diagnostics.fallbackReason == "device not eligible", "availability reason is preserved")
+            expect(
+                summary.diagnostics.availability.unavailability?.reason == .deviceNotEligible,
+                "typed unavailability reason is preserved"
+            )
             expect(summary.suggestions.first?.action == .reminder, "fallback proposes reminder")
         } catch {
             fail("unavailable model scenario threw \(error)")
         }
     }
 
-    mutating func malformedModelOutputUsesFallback() async {
+    mutating func guardrailViolationFallsBack() async {
+        let model = StaticStructuredModelClient(failure: .guardrailViolation(detail: "sensitive"))
+        let service = LocalAssistService(model: model)
+
         do {
-            let model = StaticLanguageModelClient(
-                state: .available,
-                response: "Here is a summary, but not JSON."
-            )
-            let service = LocalAssistService(primaryModel: model)
-            let summary = try await service.summarize(
-                AssistantRequest(sourceText: "Send Mira blockers by Friday.")
-            )
-            expect(summary.source == .deterministicFallback, "malformed model output falls back")
-            expect(summary.suggestions.first?.action == .messageDraft, "send task becomes message draft")
+            let summary = try await service.summarize(AssistantRequest(sourceText: "Review notes tomorrow."))
+            expect(summary.source == .deterministicFallback, "guardrail violation falls back")
+            expect(summary.diagnostics.fallbackReason?.contains("guardrailViolation") == true, "guardrail fallback reason")
         } catch {
-            fail("malformed model scenario threw \(error)")
+            fail("guardrail scenario threw unexpected \(error)")
         }
     }
 
-    mutating func guidedModelOutputUsesFoundationSource() async {
+    mutating func typedModelOutputUsesFoundationSource() async {
         do {
-            let response = """
-            {
-              "overview": "Mira needs launch blockers and a design sync.",
-              "keyPoints": ["Send Mira blockers", "Schedule a design sync"],
-              "suggestions": [
-                {
-                  "title": "Send Mira blockers",
-                  "priority": "high",
-                  "dueHint": "Friday",
-                  "action": "messageDraft",
-                  "rationale": "A direct follow-up message is needed.",
-                  "confidence": 0.91
+            let service = LocalAssistService(model: StaticStructuredModelClient.completing(with: .mira))
+            let summary = try await service.summarize(
+                AssistantRequest(sourceText: "Send Mira blockers by Friday.")
+            )
+            expect(summary.source == .foundationModels, "typed output uses model source")
+            expect(summary.suggestions.first?.priority == .high, "typed priority is preserved")
+            expect(summary.actionDrafts.first?.kind == .messageDraft, "typed action draft is built")
+        } catch {
+            fail("typed model scenario threw \(error)")
+        }
+    }
+
+    mutating func streamingExposesTypedPartials() async {
+        do {
+            let script = [
+                StructuredSummaryPartial(overview: "A launch sync needs a calendar hold."),
+                StructuredSummaryPartial.launchSync,
+            ]
+            let service = LocalAssistService(model: StaticStructuredModelClient(script: script))
+
+            var sawStreamingOverview = false
+            var summary: StructuredSummary?
+            for try await update in service.streamSummary(
+                AssistantRequest(sourceText: "Schedule a launch sync next week and share the agenda.")
+            ) {
+                if update.phase == .streamingModel, update.partial?.overview != nil {
+                    sawStreamingOverview = true
                 }
-              ]
+                if let final = update.summary {
+                    summary = final
+                }
             }
-            """
-            let model = StaticLanguageModelClient(state: .available, response: response)
-            let service = LocalAssistService(primaryModel: model)
-            let summary = try await service.summarize(
-                AssistantRequest(sourceText: "Send Mira blockers by Friday.")
-            )
-            expect(summary.source == .foundationModels, "guided JSON uses model source")
-            expect(summary.suggestions.first?.priority == .high, "guided priority is preserved")
-            expect(summary.actionDrafts.first?.kind == .messageDraft, "guided action draft is built")
-        } catch {
-            fail("guided model scenario threw \(error)")
-        }
-    }
 
-    mutating func streamingUpdatesExposePartialTextAndFinalSummary() async {
-        do {
-            let result = try await streamedSummaryResult()
-            expect(result.partials.count >= 2, "streaming partial count")
-            expect(result.partials.contains { $0.contains("\"overview\"") }, "streaming partial text")
-            expect(result.summary?.source == .foundationModels, "streaming final source")
-            expect(result.summary?.suggestions.first?.action == .calendarHold, "streaming final action")
+            expect(sawStreamingOverview, "typed overview streams before completion")
+            expect(summary?.source == .foundationModels, "streaming final source")
+            expect(summary?.suggestions.first?.action == .calendarHold, "streaming final action")
         } catch {
-            fail("streaming model scenario threw \(error)")
+            fail("streaming scenario threw \(error)")
         }
     }
 
@@ -162,12 +163,11 @@ private struct SelfTestSuite {
     }
 
     mutating func cancellationPropagates() async {
-        let model = StaticLanguageModelClient(
-            state: .available,
-            response: "{}",
-            delayNanoseconds: 2_000_000_000
+        let model = StaticStructuredModelClient(
+            script: [.launchSync],
+            initialDelayNanoseconds: 2_000_000_000
         )
-        let service = LocalAssistService(primaryModel: model)
+        let service = LocalAssistService(model: model)
         let task = Task {
             try await service.summarize(
                 AssistantRequest(sourceText: "Review cancellation behavior tomorrow.")
@@ -188,20 +188,11 @@ private struct SelfTestSuite {
     }
 
     mutating func streamingCancellationPropagates() async {
-        let response = """
-        {
-          "overview": "Cancellation should interrupt streaming.",
-          "keyPoints": ["Cancel streaming"],
-          "suggestions": []
-        }
-        """
-        let model = StaticLanguageModelClient(
-            state: .available,
-            response: response,
-            streamChunks: [response],
+        let model = StaticStructuredModelClient(
+            script: [.launchSync],
             chunkDelayNanoseconds: 2_000_000_000
         )
-        let service = LocalAssistService(primaryModel: model)
+        let service = LocalAssistService(model: model)
         let task = Task {
             var updateCount = 0
             for try await _ in service.streamSummary(
@@ -245,17 +236,20 @@ private struct SelfTestSuite {
 
     mutating func deterministicFallbackIsStable() async {
         do {
-            let service = LocalAssistService()
+            let service = LocalAssistService(fallback: DeterministicFallbackGenerator(clock: .frozen))
             let request = AssistantRequest(
                 sourceText: "Schedule a launch sync next week and send the agenda to Mira.",
                 maxSuggestions: 3
             )
             let first = try await service.summarize(request)
             let second = try await service.summarize(request)
+            let firstData = try SummaryFormatter.jsonData(first, prettyPrinted: false)
+            let secondData = try SummaryFormatter.jsonData(second, prettyPrinted: false)
             expect(first.overview == second.overview, "stable overview")
             expect(first.keyPoints == second.keyPoints, "stable key points")
             expect(first.suggestions == second.suggestions, "stable suggestions")
             expect(first.actionDrafts == second.actionDrafts, "stable action drafts")
+            expect(firstData == secondData, "stable encoded fallback output")
         } catch {
             fail("stable fallback threw \(error)")
         }
@@ -274,21 +268,24 @@ private struct SelfTestSuite {
         }
     }
 
-    mutating func actionDraftsPrepareForConfirmation() async {
+    mutating func executorWritesThroughRecordingStore() async {
         do {
-            let run = try await measuredFallbackRun()
-            let preparer = DraftOnlyToolActionPreparer()
-            var prepared: [PreparedToolAction] = []
+            let store = RecordingWriteStore()
+            let executor = SystemActionExecutor(store: store)
+            let draft = ToolActionDraft(
+                kind: .reminder,
+                title: "Create reminder",
+                payload: ["title": "Send Mira the blockers", "dueHint": "Friday"]
+            )
+            let prepared = try await DraftOnlyToolActionPreparer().prepare(draft)
+            let executed = try await executor.execute(prepared)
 
-            for draft in run.summary.actionDrafts {
-                try prepared.append(await preparer.prepare(draft))
-            }
-
-            expect(!prepared.isEmpty, "prepared actions are present")
-            expect(prepared.contains { $0.state == .readyForConfirmation }, "prepared actions require confirmation")
-            expect(prepared.allSatisfy { !$0.confirmationMessage.isEmpty }, "prepared action messages")
+            expect(executed.didWriteToSystem, "executor reports a system write")
+            let reminders = await store.reminders
+            expect(reminders.count == 1, "executor writes one reminder")
+            expect(reminders.first?.due != nil, "executor resolves the due hint")
         } catch {
-            fail("action preparation threw \(error)")
+            fail("executor scenario threw \(error)")
         }
     }
 
@@ -327,6 +324,19 @@ private struct SelfTestSuite {
         }
     }
 
+    mutating func evalHarnessScoresFallback() async {
+        do {
+            let report = try await EvalRunner.run(
+                service: LocalAssistService(),
+                configurationLabel: "selftest"
+            )
+            expect(report.caseResults.count == EvalDataset.standard.count, "eval case count")
+            expect(report.meanComposite >= 0.75, "eval mean composite >= 0.75 (was \(report.meanComposite))")
+        } catch {
+            fail("eval harness threw \(error)")
+        }
+    }
+
     mutating func expectThrows(
         _ expected: LocalAssistError,
         _ label: String,
@@ -355,6 +365,40 @@ private struct SelfTestSuite {
     }
 }
 
+private extension StructuredSummaryPartial {
+    static let mira = StructuredSummaryPartial(
+        overview: "Mira needs launch blockers and a design sync.",
+        keyPoints: ["Send Mira blockers", "Schedule a design sync"],
+        suggestions: [
+            TaskSuggestionPartial(
+                title: "Send Mira blockers",
+                priority: .high,
+                dueHint: "Friday",
+                action: .messageDraft,
+                rationale: "A direct follow-up message is needed.",
+                confidence: 0.91
+            ),
+        ],
+        isComplete: true
+    )
+
+    static let launchSync = StructuredSummaryPartial(
+        overview: "A launch sync needs a calendar hold.",
+        keyPoints: ["Schedule the launch sync", "Share the agenda"],
+        suggestions: [
+            TaskSuggestionPartial(
+                title: "Schedule launch sync",
+                priority: .medium,
+                dueHint: "next week",
+                action: .calendarHold,
+                rationale: "The team needs time reserved for launch coordination.",
+                confidence: 0.84
+            ),
+        ],
+        isComplete: true
+    )
+}
+
 private func measuredFallbackRun() async throws -> AssistantRun {
     let service = LocalAssistService()
     return try await service.summarizeWithMetrics(
@@ -363,61 +407,6 @@ private func measuredFallbackRun() async throws -> AssistantRun {
             maxSuggestions: 3
         )
     )
-}
-
-private func streamedSummaryResult() async throws -> (
-    partials: [String],
-    summary: StructuredSummary?
-) {
-    let response = """
-    {
-      "overview": "A launch sync needs a calendar hold.",
-      "keyPoints": ["Schedule the launch sync", "Share the agenda"],
-      "suggestions": [
-        {
-          "title": "Schedule launch sync",
-          "priority": "medium",
-          "dueHint": "next week",
-          "action": "calendarHold",
-          "rationale": "The team needs time reserved for launch coordination.",
-          "confidence": 0.84
-        }
-      ]
-    }
-    """
-    let chunks = [
-        "{",
-        """
-        {
-          "overview": "A launch sync needs a calendar hold.",
-          "keyPoints": ["Schedule the launch sync"],
-          "suggestions": []
-        }
-        """,
-        response,
-    ]
-    let model = StaticLanguageModelClient(
-        state: .available,
-        response: response,
-        streamChunks: chunks
-    )
-    let service = LocalAssistService(primaryModel: model)
-
-    var partials: [String] = []
-    var summary: StructuredSummary?
-
-    for try await update in service.streamSummary(
-        AssistantRequest(sourceText: "Schedule a launch sync next week and share the agenda.")
-    ) {
-        if update.phase == .streamingModel, !update.partialText.isEmpty {
-            partials.append(update.partialText)
-        }
-        if let final = update.summary {
-            summary = final
-        }
-    }
-
-    return (partials, summary)
 }
 
 private func sampleRun(index: Int, latency: Double) -> AssistantRun {
@@ -438,9 +427,8 @@ private func sampleRun(index: Int, latency: Double) -> AssistantRun {
         actionDrafts: [draft],
         source: .deterministicFallback,
         diagnostics: GenerationDiagnostics(
-            availability: .unavailable(reason: "test"),
-            fallbackReason: "test",
-            repairedMalformedModelOutput: false
+            availability: .unavailable(ModelUnavailability(reason: .forcedOffline, detail: "test")),
+            fallbackReason: "test"
         )
     )
     return AssistantRun(

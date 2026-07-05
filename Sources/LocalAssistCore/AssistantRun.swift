@@ -1,18 +1,38 @@
 import Foundation
 
-public struct AssistantRun: Codable, Equatable, Sendable {
+public struct AssistantRun: Codable, Equatable, Sendable, Identifiable {
+    public var id: String
     public var request: AssistantRequest
     public var summary: StructuredSummary
     public var metrics: RunMetrics
 
     public init(
+        id: String = UUID().uuidString,
         request: AssistantRequest,
         summary: StructuredSummary,
         metrics: RunMetrics
     ) {
+        self.id = id
         self.request = request
         self.summary = summary
         self.metrics = metrics
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case request
+        case summary
+        case metrics
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        request = try container.decode(AssistantRequest.self, forKey: .request)
+        summary = try container.decode(StructuredSummary.self, forKey: .summary)
+        metrics = try container.decode(RunMetrics.self, forKey: .metrics)
+        // Pre-identity history entries derive a stable id from their timestamp.
+        id = try container.decodeIfPresent(String.self, forKey: .id)
+            ?? "run-\(Int(metrics.startedAt.timeIntervalSince1970 * 1000))"
     }
 }
 

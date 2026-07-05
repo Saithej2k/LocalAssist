@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  # The plain CommandLineTools toolchain silently builds-but-skips XCTest
+  # bundles; pin the full Xcode toolchain so `swift test` actually executes.
+  DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+
 jobs:
   test:
     runs-on: macos-26
@@ -13,9 +18,13 @@ jobs:
       - name: Swift version
         run: swift --version
       - name: Test
-        run: swift test
+        run: |
+          swift test 2>&1 | tee /tmp/swift-test.log
+          grep -q "Executed .* tests, with 0 failures" /tmp/swift-test.log
       - name: Self test
         run: swift run localassist-selftest
+      - name: Output-quality evals
+        run: swift run localassist-eval --min-score 0.9
       - name: Benchmark smoke
         run: |
           swift run localassist-bench --iterations 8 --warmup 1 --concurrency 2 --json --output /tmp/localassist-benchmark.json >/tmp/localassist-benchmark.stdout

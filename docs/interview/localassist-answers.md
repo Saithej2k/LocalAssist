@@ -6,30 +6,23 @@ LocalAssist turns local text such as meeting notes or email drafts into a struct
 
 ## How Did You Use Foundation Models?
 
-I isolated Foundation Models behind `LanguageModelClient`. The live adapter checks `SystemLanguageModel.default.availability`, then streams `LanguageModelSession().streamResponse(to:)`. The rest of the app receives typed `StructuredSummary` output and does not depend directly on Foundation Models APIs.
+I isolated Foundation Models behind `StructuredModelClient`. The live adapter checks `SystemLanguageModel.default.availability`, then streams `LanguageModelSession.streamResponse(to:generating: DailyBrief.self)`. The rest of the app receives typed `StructuredSummaryPartial` snapshots and never imports FoundationModels from the view layer.
 
 ## What Is Guided Generation?
 
-Instead of asking for free-form prose, LocalAssist prompts the model to return a strict JSON contract with `overview`, `keyPoints`, and `suggestions`. The app extracts the JSON object, decodes it into Swift types, clamps suggestion counts, validates action types, and falls back deterministically if decoding fails.
+Instead of asking for free-form prose, LocalAssist uses native guided generation with `@Generable` `DailyBrief` and `BriefTaskSuggestion` types. The contract is `headline`, `keyPoints`, and `tasks`, with optional ISO-8601 due dates. Constrained decoding means there is no JSON extraction, regex repair, or malformed-output cleanup path.
 
 ## What Did You Mean By Tool Calling?
 
-The app does not let the model perform system writes directly. It maps suggested tasks into tool-action drafts:
-
-- reminder
-- calendar hold
-- message draft
-- checklist item
-
-Each draft is staged by `DraftOnlyToolActionPreparer` and requires user confirmation before any future integration writes to Reminders, Calendar, or Messages.
+The model gets one read-only tool: `CalendarAvailabilityTool`. It checks an actor-isolated sample agenda store through the `FreeBusyProviding` protocol, so the model can avoid colliding due dates without getting write access. EventKit can replace the sample provider later without changing the Tool conformance. Any write-like result is still staged as a draft and requires user confirmation.
 
 ## How Did You Handle Streaming And Cancellation?
 
 The app has a stream-first generation path:
 
-- `LanguageModelClient.streamResponse(for:)` exposes partial model output as `AsyncThrowingStream<PartialGeneration, Error>`.
-- `FoundationModelsLanguageModelClient` maps `LanguageModelSession.streamResponse(to:)` snapshots into partial text updates.
-- `LocalAssistService.streamSummary(_:)` emits validation, availability, prompt, streaming, decoding, fallback, and completed phases.
+- `StructuredModelClient.streamSummary(for:)` exposes engine-agnostic `StructuredSummaryPartial` snapshots.
+- `FoundationModelsSummarizer` maps `LanguageModelSession.streamResponse(to:generating:)` snapshots into headline/key point/task partials.
+- `LocalAssistService.streamSummary(_:)` emits validation, availability, model streaming, fallback, normalizing, and completed phases.
 - SwiftUI stores partial text in transient state and only commits `StructuredSummary` after guided JSON validation succeeds.
 - Cancellation is owned by a cancellable SwiftUI `Task`; the service, fallback generation, static test clients, and action preparation call `Task.checkCancellation()`.
 - XCTest covers both delayed final-response cancellation and delayed streaming cancellation.
@@ -86,4 +79,4 @@ The UI changes by device:
 
 ## How Do You Test Model-Unavailable And Offline Fallback?
 
-The app injects `LanguageModelClient`, so tests pass deterministic clients that return unavailable states, malformed JSON, delayed responses, or valid guided JSON. Coverage includes malformed input, model availability, malformed model output, concurrent requests, cancellation, offline execution, deterministic fallback, run metrics, action preparation, metric distributions, and history persistence.
+The app injects `StructuredModelClient`, so tests pass deterministic clients that return unavailable states, generation failures, delayed responses, or valid guided snapshots. Coverage includes malformed input, model availability, guardrail/context/decoding fallback, concurrent requests, cancellation, offline execution, frozen-clock deterministic fallback, ISO due-date parsing, run metrics, action preparation, metric distributions, and history persistence.

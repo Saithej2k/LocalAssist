@@ -47,7 +47,9 @@ public struct RequestValidator: Sendable {
         return AssistantRequest(
             sourceText: trimmedText,
             localeIdentifier: request.localeIdentifier,
-            maxSuggestions: request.maxSuggestions
+            maxSuggestions: request.maxSuggestions,
+            inputKind: request.inputKind,
+            isRefinement: request.isRefinement
         )
     }
 }

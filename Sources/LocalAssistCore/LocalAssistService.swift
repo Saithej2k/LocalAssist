@@ -1,48 +1,41 @@
 import Foundation
+import OSLog
 
-public protocol LanguageModelClient: Sendable {
-    func availability() async -> ModelAvailability
-    func generateResponse(for prompt: String) async throws -> String
-    func streamResponse(for prompt: String) -> AsyncThrowingStream<PartialGeneration, Error>
-}
-
-public extension LanguageModelClient {
-    func streamResponse(for prompt: String) -> AsyncThrowingStream<PartialGeneration, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    let response = try await generateResponse(for: prompt)
-                    try Task.checkCancellation()
-                    continuation.yield(PartialGeneration(text: response, isComplete: true))
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-
-            continuation.onTermination = { @Sendable _ in
-                task.cancel()
-            }
-        }
-    }
-}
-
+/// Orchestrates a summary run: validation, availability, typed streaming from
+/// the on-device model, normalization, and the deterministic offline fallback.
+///
+/// Fallback policy: the deterministic summarizer substitutes whenever the
+/// model cannot complete a usable brief. Availability failures, guardrails,
+/// context-window errors, refusals, and transient generation failures all keep
+/// the app moving offline while diagnostics preserve the exact reason.
 public struct LocalAssistService: Sendable {
-    private let primaryModel: (any LanguageModelClient)?
+    private let model: (any StructuredModelClient)?
     private let fallback: DeterministicFallbackGenerator
-    private let guide: GenerationGuide
+    private let normalizer: SummaryNormalizer
     private let validator: RequestValidator
 
     public init(
-        primaryModel: (any LanguageModelClient)? = nil,
+        model: (any StructuredModelClient)? = nil,
         fallback: DeterministicFallbackGenerator = DeterministicFallbackGenerator(),
-        guide: GenerationGuide = GenerationGuide(),
+        normalizer: SummaryNormalizer = SummaryNormalizer(),
         validator: RequestValidator = RequestValidator()
     ) {
-        self.primaryModel = primaryModel
+        self.model = model
         self.fallback = fallback
-        self.guide = guide
+        self.normalizer = normalizer
         self.validator = validator
+    }
+
+    /// Warms up the underlying model so the first request streams sooner.
+    public func prewarm() async {
+        await model?.prewarm()
+    }
+
+    public func availability() async -> ModelAvailability {
+        guard let model else {
+            return .unavailable(ModelUnavailability(reason: .adapterNotConfigured))
+        }
+        return await model.availability()
     }
 
     public func summarize(_ request: AssistantRequest) async throws -> StructuredSummary {
@@ -101,187 +94,170 @@ public struct LocalAssistService: Sendable {
         }
         try Task.checkCancellation()
 
-        guard let primaryModel else {
-            emit(.init(phase: .fallback, message: "No on-device model adapter was configured"))
-            let fallbackState = signposter.beginInterval("Fallback generation")
-            defer {
-                signposter.endInterval("Fallback generation", fallbackState)
-            }
-            let summary = try await fallback.generate(
+        guard let model else {
+            return try await fallbackSummary(
                 for: validated,
-                reason: "No on-device model adapter was configured."
+                unavailability: ModelUnavailability(reason: .adapterNotConfigured),
+                emit: emit,
+                signposter: signposter
             )
-            emit(.init(phase: .completed, summary: summary, message: "Completed with deterministic fallback"))
-            return summary
         }
 
         emit(.init(phase: .checkingAvailability, message: "Checking Foundation Models availability"))
         let availabilityState = signposter.beginInterval("Model availability")
-        let availability = await primaryModel.availability()
+        let availability = await model.availability()
         signposter.endInterval("Model availability", availabilityState)
         try Task.checkCancellation()
 
         guard availability.isAvailable else {
-            emit(.init(phase: .fallback, message: availability.reason ?? "The on-device model is unavailable"))
-            let fallbackState = signposter.beginInterval("Fallback generation")
-            defer {
-                signposter.endInterval("Fallback generation", fallbackState)
-            }
-            let summary = try await fallback.generate(
+            let unavailability = availability.unavailability
+                ?? ModelUnavailability(reason: .other)
+            return try await fallbackSummary(
                 for: validated,
-                reason: availability.reason ?? "The on-device model is unavailable."
+                unavailability: unavailability,
+                emit: emit,
+                signposter: signposter
             )
-            emit(.init(phase: .completed, summary: summary, message: "Completed with deterministic fallback"))
-            return summary
         }
 
-        emit(.init(phase: .buildingPrompt, message: "Building guided JSON prompt"))
-        let promptState = signposter.beginInterval("Build guided prompt")
-        let prompt = guide.prompt(for: validated)
-        signposter.endInterval("Build guided prompt", promptState)
-
         do {
-            let rawResponse: String
-            do {
-                let responseState = signposter.beginInterval("Model response")
-                defer {
-                    signposter.endInterval("Model response", responseState)
-                }
-                emit(.init(phase: .streamingModel, message: "Streaming on-device model response"))
-                rawResponse = try await collectStreamingResponse(
-                    prompt: prompt,
-                    model: primaryModel,
-                    emit: emit
-                )
+            let responseState = signposter.beginInterval("Model response")
+            emit(.init(phase: .streamingModel, message: "Streaming on-device model response"))
+
+            var latest: StructuredSummaryPartial?
+            for try await partial in model.streamSummary(for: validated) {
+                try Task.checkCancellation()
+                latest = partial
+                emit(.init(
+                    phase: .streamingModel,
+                    partial: partial,
+                    message: partial.isComplete
+                        ? "Model response complete"
+                        : "Streaming on-device model response"
+                ))
             }
+            signposter.endInterval("Model response", responseState)
             try Task.checkCancellation()
 
-            emit(.init(phase: .decoding, partialText: rawResponse, message: "Validating guided JSON"))
-            let decodeState = signposter.beginInterval("Decode guided JSON")
-            let decodedSummary = guide.decode(
-                rawResponse: rawResponse,
+            guard let latest, latest.isComplete else {
+                throw GenerationFailure.decodingFailure(
+                    detail: "The model stream ended before producing a complete summary."
+                )
+            }
+
+            emit(.init(phase: .normalizing, partial: latest, message: "Normalizing structured output"))
+            let normalizeState = signposter.beginInterval("Normalize summary")
+            let summary = normalizer.summary(
+                from: latest,
                 request: validated,
                 availability: availability
             )
-            signposter.endInterval("Decode guided JSON", decodeState)
+            signposter.endInterval("Normalize summary", normalizeState)
 
-            if let summary = decodedSummary {
-                emit(.init(phase: .completed, partialText: rawResponse, summary: summary, message: "Completed with Foundation Models"))
-                return summary
+            guard let summary else {
+                throw GenerationFailure.decodingFailure(
+                    detail: "The model produced an empty overview or no key points."
+                )
             }
 
-            emit(.init(phase: .fallback, partialText: rawResponse, message: "Malformed guided JSON; using deterministic fallback"))
-            let fallbackState = signposter.beginInterval("Fallback generation")
-            defer {
-                signposter.endInterval("Fallback generation", fallbackState)
-            }
-            let summary = try await fallback.generate(
-                for: validated,
-                reason: "The on-device model returned malformed guided JSON."
-            )
-            emit(.init(phase: .completed, summary: summary, message: "Completed with deterministic fallback"))
+            emit(.init(
+                phase: .completed,
+                partial: latest,
+                summary: summary,
+                message: "Completed with Foundation Models"
+            ))
             return summary
         } catch is CancellationError {
             throw CancellationError()
-        } catch {
-            emit(.init(phase: .fallback, message: "Model failed; using deterministic fallback"))
-            let fallbackState = signposter.beginInterval("Fallback generation")
-            defer {
-                signposter.endInterval("Fallback generation", fallbackState)
+        } catch let failure as GenerationFailure {
+            if case .modelUnavailable(let unavailability) = failure {
+                return try await fallbackSummary(
+                    for: validated,
+                    unavailability: unavailability,
+                    emit: emit,
+                    signposter: signposter
+                )
             }
-            let summary = try await fallback.generate(
+            return try await fallbackSummary(
                 for: validated,
-                reason: "The on-device model failed: \(error.localizedDescription)"
+                availability: availability,
+                fallbackReason: String(describing: failure),
+                guidance: failure.userMessage,
+                emit: emit,
+                signposter: signposter
             )
-            emit(.init(phase: .completed, summary: summary, message: "Completed with deterministic fallback"))
-            return summary
+        } catch {
+            throw GenerationFailure.unknown(detail: String(describing: error))
         }
     }
 
-    private func collectStreamingResponse(
-        prompt: String,
-        model: any LanguageModelClient,
+    private func fallbackSummary(
+        for request: AssistantRequest,
+        unavailability: ModelUnavailability,
+        emit: @Sendable (SummaryGenerationUpdate) -> Void,
+        signposter: OSSignposter
+    ) async throws -> StructuredSummary {
+        try await fallbackSummary(
+            for: request,
+            availability: .unavailable(unavailability),
+            fallbackReason: unavailability.detail,
+            guidance: unavailability.userGuidance,
+            emit: emit,
+            signposter: signposter
+        )
+    }
+
+    private func fallbackSummary(
+        for request: AssistantRequest,
+        availability: ModelAvailability,
+        fallbackReason: String,
+        guidance: String,
+        emit: @Sendable (SummaryGenerationUpdate) -> Void,
+        signposter: OSSignposter
+    ) async throws -> StructuredSummary {
+        emit(.init(phase: .fallback, message: guidance))
+        let fallbackState = signposter.beginInterval("Fallback generation")
+        defer {
+            signposter.endInterval("Fallback generation", fallbackState)
+        }
+
+        let summary = try await fallback.generate(
+            for: request,
+            availability: availability,
+            fallbackReason: fallbackReason
+        )
+        emitFallbackPartials(for: summary, message: guidance, emit: emit)
+        emit(.init(
+            phase: .completed,
+            summary: summary,
+            message: "Completed with deterministic fallback"
+        ))
+        return summary
+    }
+
+    private func emitFallbackPartials(
+        for summary: StructuredSummary,
+        message: String,
         emit: @Sendable (SummaryGenerationUpdate) -> Void
-    ) async throws -> String {
-        var rawResponse = ""
-
-        for try await partial in model.streamResponse(for: prompt) {
-            try Task.checkCancellation()
-            rawResponse = partial.text
-            emit(.init(
-                phase: .streamingModel,
-                partialText: rawResponse,
-                message: partial.isComplete ? "Model response complete" : "Streaming on-device model response"
-            ))
-        }
-
-        try Task.checkCancellation()
-        return rawResponse
-    }
-}
-
-public struct StaticLanguageModelClient: LanguageModelClient {
-    private let state: ModelAvailability
-    private let response: String
-    private let delayNanoseconds: UInt64
-    private let streamChunks: [String]?
-    private let chunkDelayNanoseconds: UInt64
-
-    public init(
-        state: ModelAvailability = .available,
-        response: String,
-        delayNanoseconds: UInt64 = 0,
-        streamChunks: [String]? = nil,
-        chunkDelayNanoseconds: UInt64 = 0
     ) {
-        self.state = state
-        self.response = response
-        self.delayNanoseconds = delayNanoseconds
-        self.streamChunks = streamChunks
-        self.chunkDelayNanoseconds = chunkDelayNanoseconds
-    }
+        var partial = StructuredSummaryPartial(overview: summary.headline)
+        emit(.init(phase: .fallback, partial: partial, message: message))
 
-    public func availability() async -> ModelAvailability {
-        state
-    }
+        partial.keyPoints = summary.keyPoints
+        emit(.init(phase: .fallback, partial: partial, message: message))
 
-    public func generateResponse(for _: String) async throws -> String {
-        if delayNanoseconds > 0 {
-            try await Task.sleep(nanoseconds: delayNanoseconds)
+        partial.suggestions = summary.tasks.map {
+            TaskSuggestionPartial(
+                title: $0.title,
+                priority: $0.priority,
+                dueHint: $0.dueHint,
+                dueDate: $0.dueDate,
+                action: $0.action,
+                rationale: $0.rationale,
+                confidence: $0.confidence
+            )
         }
-        try Task.checkCancellation()
-        return response
-    }
-
-    public func streamResponse(for _: String) -> AsyncThrowingStream<PartialGeneration, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    if delayNanoseconds > 0 {
-                        try await Task.sleep(nanoseconds: delayNanoseconds)
-                    }
-
-                    let chunks = streamChunks ?? [response]
-                    for (index, chunk) in chunks.enumerated() {
-                        if chunkDelayNanoseconds > 0 {
-                            try await Task.sleep(nanoseconds: chunkDelayNanoseconds)
-                        }
-                        try Task.checkCancellation()
-                        continuation.yield(PartialGeneration(
-                            text: chunk,
-                            isComplete: index == chunks.count - 1
-                        ))
-                    }
-
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-
-            continuation.onTermination = { @Sendable _ in
-                task.cancel()
-            }
-        }
+        partial.isComplete = true
+        emit(.init(phase: .fallback, partial: partial, message: message))
     }
 }

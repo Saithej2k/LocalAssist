@@ -16,7 +16,10 @@ public enum SummaryFormatter {
             lines.append("Suggested tasks")
             lines.append(
                 contentsOf: summary.suggestions.map { suggestion in
-                    let due = suggestion.dueHint.map { " due \($0)" } ?? ""
+                    let due = suggestion.iso8601DueDate
+                        .map { " due \($0)" }
+                        ?? suggestion.dueHint.map { " due \($0)" }
+                        ?? ""
                     return "- [\(suggestion.priority.rawValue)] \(suggestion.title)\(due)"
                 }
             )
@@ -38,8 +41,9 @@ public enum SummaryFormatter {
     public static func jsonData(_ summary: StructuredSummary, prettyPrinted: Bool = true) throws -> Data {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
         if prettyPrinted {
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.outputFormatting.insert(.prettyPrinted)
         }
         return try encoder.encode(summary)
     }

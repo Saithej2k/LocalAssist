@@ -13,9 +13,8 @@ This document records the project-level Instruments result used by the resume bu
   - `Summarize`
   - `Validate request`
   - `Model availability`
-  - `Build guided prompt`
   - `Model response`
-  - `Decode guided JSON`
+  - `Normalize summary`
   - `Fallback generation`
   - `LanguageModelSession.streamResponse`
   - `Prepare action draft`
@@ -62,7 +61,7 @@ The repo now includes `project.yml`/`LocalAssist.xcodeproj`, the iOS app target,
 The checked-in CLI benchmark is separate from the Instruments result. It measures the deterministic fallback path for repeatable CI coverage:
 
 ```bash
-swift run -c release localassist-bench --iterations 100 --warmup 5 --concurrency 4 --json --output docs/performance/2026-07-01-benchmark.json
+swift run -c release localassist-bench --iterations 100 --warmup 5 --concurrency 4 --json --output docs/performance/2026-07-02-benchmark.json
 ```
 
 That baseline is intentionally much faster than the live Foundation Models path and should not be confused with the resume p95 number.

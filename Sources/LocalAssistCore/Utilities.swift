@@ -1,5 +1,11 @@
 import Foundation
 
+public extension Notification.Name {
+    /// Posted when an external entry point (App Shortcut, Lock Screen widget
+    /// deep link) asks the app to start a voice capture immediately.
+    static let localAssistCaptureRequested = Notification.Name("com.saithej.localassist.capture-requested")
+}
+
 enum OrderedUnique {
     static func values(_ input: [String]) -> [String] {
         var seen = Set<String>()

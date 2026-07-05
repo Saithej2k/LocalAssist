@@ -45,6 +45,6 @@ Record:
 
 ## Latest Local Baseline
 
-See [2026-07-01-baseline.md](performance/2026-07-01-baseline.md).
+See [2026-07-02-baseline.md](performance/2026-07-02-baseline.md).
 
 The local CLI baseline measures deterministic fallback performance for repeatable CI. It is not the same measurement as the 1,420 ms to 910 ms Foundation Models Instruments profile.

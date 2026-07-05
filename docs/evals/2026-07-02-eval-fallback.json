@@ -1,0 +1,122 @@
+{
+  "caseResults" : [
+    {
+      "actionAccuracy" : 1,
+      "caseID" : "blockers-message",
+      "composite" : 1,
+      "dueHintAccuracy" : 1,
+      "hallucinationFree" : 1,
+      "latencyMilliseconds" : 28.126084,
+      "notes" : [
+
+      ],
+      "source" : "deterministicFallback",
+      "structureScore" : 1,
+      "taskRecall" : 1
+    },
+    {
+      "actionAccuracy" : 1,
+      "caseID" : "urgent-deadline",
+      "composite" : 1,
+      "dueHintAccuracy" : 1,
+      "hallucinationFree" : 1,
+      "latencyMilliseconds" : 20.553083,
+      "notes" : [
+
+      ],
+      "source" : "deterministicFallback",
+      "structureScore" : 1,
+      "taskRecall" : 1
+    },
+    {
+      "actionAccuracy" : 1,
+      "caseID" : "checklist-update",
+      "composite" : 1,
+      "dueHintAccuracy" : 1,
+      "hallucinationFree" : 1,
+      "latencyMilliseconds" : 90.0545,
+      "notes" : [
+
+      ],
+      "source" : "deterministicFallback",
+      "structureScore" : 1,
+      "taskRecall" : 1
+    },
+    {
+      "actionAccuracy" : 1,
+      "caseID" : "meeting-notes",
+      "composite" : 1,
+      "dueHintAccuracy" : 1,
+      "hallucinationFree" : 1,
+      "latencyMilliseconds" : 59.740959,
+      "notes" : [
+
+      ],
+      "source" : "deterministicFallback",
+      "structureScore" : 1,
+      "taskRecall" : 1
+    },
+    {
+      "actionAccuracy" : 1,
+      "caseID" : "single-task",
+      "composite" : 1,
+      "dueHintAccuracy" : 1,
+      "hallucinationFree" : 1,
+      "latencyMilliseconds" : 2.326166,
+      "notes" : [
+
+      ],
+      "source" : "deterministicFallback",
+      "structureScore" : 1,
+      "taskRecall" : 1
+    },
+    {
+      "actionAccuracy" : 1,
+      "caseID" : "bullet-list",
+      "composite" : 1,
+      "dueHintAccuracy" : 1,
+      "hallucinationFree" : 1,
+      "latencyMilliseconds" : 45.022916,
+      "notes" : [
+
+      ],
+      "source" : "deterministicFallback",
+      "structureScore" : 1,
+      "taskRecall" : 1
+    },
+    {
+      "actionAccuracy" : 1,
+      "caseID" : "no-deadline",
+      "composite" : 1,
+      "dueHintAccuracy" : 1,
+      "hallucinationFree" : 1,
+      "latencyMilliseconds" : 71.667917,
+      "notes" : [
+
+      ],
+      "source" : "deterministicFallback",
+      "structureScore" : 1,
+      "taskRecall" : 1
+    },
+    {
+      "actionAccuracy" : 1,
+      "caseID" : "mixed-noise",
+      "composite" : 1,
+      "dueHintAccuracy" : 1,
+      "hallucinationFree" : 1,
+      "latencyMilliseconds" : 27.706125,
+      "notes" : [
+
+      ],
+      "source" : "deterministicFallback",
+      "structureScore" : 1,
+      "taskRecall" : 1
+    }
+  ],
+  "completedAt" : "2026-07-02T20:09:22Z",
+  "configurationLabel" : "deterministic-fallback",
+  "meanComposite" : 1,
+  "meanLatencyMilliseconds" : 43.14971875,
+  "minComposite" : 1,
+  "startedAt" : "2026-07-02T20:09:22Z"
+}

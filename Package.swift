@@ -14,11 +14,13 @@ let package = Package(
     products: [
         .library(name: "LocalAssistCore", targets: ["LocalAssistCore"]),
         .library(name: "LocalAssistFoundationModels", targets: ["LocalAssistFoundationModels"]),
+        .library(name: "LocalAssistSystemTools", targets: ["LocalAssistSystemTools"]),
         .library(name: "LocalAssistAppIntents", targets: ["LocalAssistAppIntents"]),
         .library(name: "LocalAssistAppUI", targets: ["LocalAssistAppUI"]),
         .executable(name: "localassist", targets: ["LocalAssistCLI"]),
         .executable(name: "localassist-bench", targets: ["LocalAssistBenchmarks"]),
-        .executable(name: "localassist-selftest", targets: ["LocalAssistSelfTests"])
+        .executable(name: "localassist-selftest", targets: ["LocalAssistSelfTests"]),
+        .executable(name: "localassist-eval", targets: ["LocalAssistEvals"])
     ],
     targets: [
         .target(name: "LocalAssistCore"),
@@ -27,17 +29,23 @@ let package = Package(
             dependencies: ["LocalAssistCore"]
         ),
         .target(
+            name: "LocalAssistSystemTools",
+            dependencies: ["LocalAssistCore"]
+        ),
+        .target(
             name: "LocalAssistAppIntents",
             dependencies: [
                 "LocalAssistCore",
-                "LocalAssistFoundationModels"
+                "LocalAssistFoundationModels",
+                "LocalAssistSystemTools"
             ]
         ),
         .target(
             name: "LocalAssistAppUI",
             dependencies: [
                 "LocalAssistCore",
-                "LocalAssistFoundationModels"
+                "LocalAssistFoundationModels",
+                "LocalAssistSystemTools"
             ]
         ),
         .executableTarget(
@@ -53,11 +61,28 @@ let package = Package(
         ),
         .executableTarget(
             name: "LocalAssistSelfTests",
+            dependencies: ["LocalAssistCore", "LocalAssistEvalKit", "LocalAssistSystemTools"]
+        ),
+        .target(
+            name: "LocalAssistEvalKit",
             dependencies: ["LocalAssistCore"]
+        ),
+        .executableTarget(
+            name: "LocalAssistEvals",
+            dependencies: [
+                "LocalAssistCore",
+                "LocalAssistEvalKit",
+                "LocalAssistFoundationModels"
+            ]
         ),
         .testTarget(
             name: "LocalAssistCoreTests",
-            dependencies: ["LocalAssistCore"],
+            dependencies: [
+                "LocalAssistCore",
+                "LocalAssistEvalKit",
+                "LocalAssistSystemTools",
+                "LocalAssistAppUI"
+            ],
             swiftSettings: [
                 .unsafeFlags([
                     "-F", developerFrameworks

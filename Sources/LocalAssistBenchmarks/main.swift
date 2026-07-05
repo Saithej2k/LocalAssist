@@ -104,12 +104,11 @@ struct LocalAssistBenchmarks {
     }
 
     private static func measureCancellation(cancelAfterMS: Int) async -> (succeeded: Bool, latencyMS: Double) {
-        let delayedModel = StaticLanguageModelClient(
-            state: .available,
-            response: "{}",
-            delayNanoseconds: 2_000_000_000
+        let delayedModel = StaticStructuredModelClient(
+            script: [StructuredSummaryPartial(overview: "Slow response", isComplete: true)],
+            initialDelayNanoseconds: 2_000_000_000
         )
-        let service = LocalAssistService(primaryModel: delayedModel)
+        let service = LocalAssistService(model: delayedModel)
         let request = AssistantRequest(sourceText: sampleText)
 
         let task = Task {

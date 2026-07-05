@@ -40,6 +40,9 @@ public struct ToolActionPlanner: Sendable {
             if let dueHint = suggestion.dueHint {
                 payload["dueHint"] = dueHint
             }
+            if let dueDate = suggestion.iso8601DueDate {
+                payload["dueDate"] = dueDate
+            }
             return ToolActionDraft(
                 kind: .reminder,
                 title: "Create reminder",
@@ -53,6 +56,9 @@ public struct ToolActionPlanner: Sendable {
             ]
             if let dueHint = suggestion.dueHint {
                 payload["dateHint"] = dueHint
+            }
+            if let dueDate = suggestion.iso8601DueDate {
+                payload["date"] = dueDate
             }
             return ToolActionDraft(
                 kind: .calendarHold,
