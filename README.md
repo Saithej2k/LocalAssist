@@ -15,8 +15,8 @@ entries. No account. No API key. No network.
 
 <br>
 
-<img src="docs/screenshots/simulator/04-capture-first-home.png" width="300" alt="Capture-first home screen">&nbsp;&nbsp;
-<img src="docs/screenshots/simulator/05-instant-brief-review.png" width="300" alt="Instant brief with editable action review">
+<img src="docs/screenshots/simulator/06-capture-home-dark.png" width="300" alt="Capture home: one text box, mic, and Generate on a Liquid Glass shelf">&nbsp;&nbsp;
+<img src="docs/screenshots/simulator/07-action-review-dark.png" width="300" alt="Generated brief with editable action review before anything is written">
 
 *Real iPhone 17 (iOS 26.5) simulator captures — no mockups.*
 
@@ -60,7 +60,8 @@ The engine details that matter:
 
 - **Siri & Shortcuts** — *"Capture a thought with LocalAssist"* opens straight into a live recording; summaries are exposed as App Entities so Shortcuts can chain them into other apps.
 - **Spotlight** — briefs are donated as `IndexedEntity` content, searchable from system search today and pre-adopted for Siri personal-context integration.
-- **Capture from anywhere** — a share extension (select text in any app → Share → LocalAssist), a camera **Scan** mode (Live Text for whiteboards, receipts, handwriting), voice, or paste.
+- **Capture from anywhere** — a share extension (select text in any app → Share → LocalAssist), the system **Scan Text** camera (the AutoFill Live Text flow, straight into the capture box), voice, or paste.
+- **One input, no filing** — there are no capture-type pickers. Typed and scanned text is classified on device (meeting notes vs. errands vs. free-form), voice tags itself, and the Smart prompt asks the model to infer the capture type before summarizing.
 - **Widgets** — one-tap capture from the Lock Screen, plus a **Due Today** widget that reads shared app-group history and raises its Smart Stack relevance while tasks are open.
 - **Task loop** — check tasks off in the Today view; done-state persists, feeds the widget, and shows up in the morning brief ("3 due today · 1 already done").
 - **Interactive snippet confirmation** — reminder creation from Siri/Spotlight shows a preview card and writes only after confirmation; confirmed message drafts open a real pre-filled composer.
@@ -106,7 +107,7 @@ Profiling: `OSSignposter` intervals cover every pipeline stage. See [docs/instru
 | `LocalAssistFoundationModels` | On-device adapter: `DailyBrief` contract and the `FoundationModelsSummarizer` actor |
 | `LocalAssistSystemTools` | EventKit-backed calendar tool + `SystemActionExecutor` for confirmed writes |
 | `LocalAssistAppIntents` | App Entities, App Shortcuts, capture intent, snippet-confirmed reminder intent |
-| `LocalAssistAppUI` | Capture-first SwiftUI surface, voice transcription, Today view, Action Review, settings, morning brief |
+| `LocalAssistAppUI` | Liquid Glass tabbed surface (Capture · Today · History), single self-classifying input, voice transcription, Action Review, settings, morning brief |
 | `LocalAssistEvalKit` + `localassist-eval` | Eval dataset, scorers, reports, CI gate |
 | `LocalAssistCLI` / `LocalAssistBenchmarks` | Demo CLI and performance harness |
 
