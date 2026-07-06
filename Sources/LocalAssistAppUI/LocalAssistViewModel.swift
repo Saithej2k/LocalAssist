@@ -122,6 +122,31 @@ public final class LocalAssistViewModel: ObservableObject {
         }
     }
 
+    /// Snapshot of the capture box taken synchronously before a recording
+    /// starts, so dictation appends to it. Owned here — snapshotting via a
+    /// SwiftUI onChange raced the first transcript update, and losing that
+    /// race replaced everything previously in the box.
+    private var voiceCaptureBaseText = ""
+
+    /// Call synchronously before starting any voice capture (mic button,
+    /// App Shortcut, Lock Screen widget).
+    public func prepareVoiceCapture() {
+        voiceCaptureBaseText = inputText
+    }
+
+    /// Live transcript updates merge onto the snapshot; the box never loses
+    /// what was there before the recording began.
+    public func mergeVoiceTranscript(_ transcript: String) {
+        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return
+        }
+        inputKind = .voiceNote
+        inputText = voiceCaptureBaseText.isEmpty
+            ? transcript
+            : voiceCaptureBaseText + "\n" + transcript
+    }
+
     public func summarize() {
         // The user never picks a capture kind: voice input keeps its kind,
         // typed or scanned text is classified from its own content.
@@ -395,12 +420,13 @@ public actor LocalAssistWorker {
     private let actionPreparer: any ToolActionPreparing
     private let actionExecutor: any ToolActionExecuting
     private let toolCounter: ToolInvocationCounter
-    private let historyStore: RunHistoryStore?
+    private var historyStore: RunHistoryStore?
+    private var historyStoreResolved: Bool
 
     public init(
         actionPreparer: any ToolActionPreparing = DraftOnlyToolActionPreparer(),
         actionExecutor: (any ToolActionExecuting)? = nil,
-        historyStore: RunHistoryStore? = RunHistoryStore.sharedOrLocal()
+        historyStore: RunHistoryStore? = nil
     ) {
         let counter = ToolInvocationCounter()
         let summarizer = LocalAssistLiveFactory.makeSummarizer(
@@ -421,6 +447,20 @@ public actor LocalAssistWorker {
             self.actionExecutor = actionExecutor ?? SimulatedActionExecutor()
         #endif
         self.historyStore = historyStore
+        // A nil store means "resolve the shared container on first use" —
+        // that lookup is an XPC call that can block for seconds on builds
+        // without a provisioned app group, and this initializer runs on the
+        // MainActor at launch. Deferring it into the actor keeps startup
+        // hang-free.
+        historyStoreResolved = historyStore != nil
+    }
+
+    private func store() -> RunHistoryStore? {
+        if !historyStoreResolved {
+            historyStoreResolved = true
+            historyStore = RunHistoryStore.sharedOrLocal()
+        }
+        return historyStore
     }
 
     public func prewarm() async {
@@ -481,14 +521,14 @@ public actor LocalAssistWorker {
     }
 
     public func loadHistory() async -> [AssistantRun] {
-        guard let historyStore else {
+        guard let historyStore = store() else {
             return []
         }
         return (try? await historyStore.load()) ?? []
     }
 
     public func setTask(_ taskID: String, completed: Bool, inRun runID: String) async -> [AssistantRun] {
-        guard let historyStore else {
+        guard let historyStore = store() else {
             return []
         }
         if let updated = try? await historyStore.setTask(taskID, completed: completed, inRun: runID) {
@@ -499,7 +539,7 @@ public actor LocalAssistWorker {
     }
 
     public func record(_ run: AssistantRun) async -> [AssistantRun] {
-        guard let historyStore else {
+        guard let historyStore = store() else {
             return [run]
         }
         let updated = (try? await historyStore.append(run)) ?? [run]
@@ -508,7 +548,7 @@ public actor LocalAssistWorker {
     }
 
     public func clearHistory() async {
-        try? await historyStore?.clear()
+        try? await store()?.clear()
         await summarizer.resetConversation()
     }
 }

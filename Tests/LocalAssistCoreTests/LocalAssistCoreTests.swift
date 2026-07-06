@@ -768,6 +768,34 @@ final class LocalAssistCoreTests: XCTestCase {
 
     // MARK: - Dictation accumulation
 
+    @MainActor
+    func testVoiceMergeAppendsAcrossRecordingSessions() {
+        // Second recording sessions must append to what earlier sessions
+        // (or typing) put in the box — the snapshot happens synchronously
+        // in prepareVoiceCapture, so no UI-observation race can lose it.
+        let viewModel = LocalAssistViewModel(worker: LocalAssistWorker(historyStore: nil))
+
+        viewModel.prepareVoiceCapture()
+        viewModel.mergeVoiceTranscript("Call Mom tonight")
+        viewModel.mergeVoiceTranscript("Call Mom tonight, grab the birthday cake Saturday")
+        XCTAssertEqual(viewModel.inputText, "Call Mom tonight, grab the birthday cake Saturday")
+
+        // User stops, then taps the mic again for a second session.
+        viewModel.prepareVoiceCapture()
+        viewModel.mergeVoiceTranscript("And also text Priya")
+        XCTAssertEqual(
+            viewModel.inputText,
+            "Call Mom tonight, grab the birthday cake Saturday\nAnd also text Priya"
+        )
+
+        // Empty partials never wipe anything.
+        viewModel.mergeVoiceTranscript("   ")
+        XCTAssertEqual(
+            viewModel.inputText,
+            "Call Mom tonight, grab the birthday cake Saturday\nAnd also text Priya"
+        )
+    }
+
     func testDictationSurvivesPausesEndedByErrorNotFinal() {
         // The exact reported flow: speak, pause (the on-device recognizer
         // ends the segment with "no speech detected" instead of a final),

@@ -244,6 +244,7 @@ public struct LocalAssistHomeView: View {
             return
         }
         CaptureHaptics.recordStart()
+        viewModel.prepareVoiceCapture()
         Task {
             await voiceTranscriber.start()
         }
@@ -378,10 +379,6 @@ private struct InputComposerView: View {
     #else
         @FocusState private var editorFocused: Bool
     #endif
-    /// Text that was already in the box when recording started, so dictation
-    /// appends to typed notes instead of overwriting them.
-    @State private var voiceBaseText = ""
-
     private var hasText: Bool {
         !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -425,7 +422,6 @@ private struct InputComposerView: View {
                     Button {
                         viewModel.inputText = ""
                         viewModel.inputKind = .note
-                        voiceBaseText = ""
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 19))
@@ -454,6 +450,9 @@ private struct InputComposerView: View {
                             voiceTranscriber.stop()
                         } else {
                             CaptureHaptics.recordStart()
+                            // Snapshot synchronously, before any transcript
+                            // can arrive — dictation appends to this.
+                            viewModel.prepareVoiceCapture()
                             Task {
                                 await voiceTranscriber.start()
                             }
@@ -514,22 +513,8 @@ private struct InputComposerView: View {
                 }
             }
         }
-        // Snapshot the box the moment any recording starts — mic button,
-        // App Shortcut, or Lock Screen widget all flow through here.
-        .onChange(of: voiceTranscriber.isRecording) { _, isRecording in
-            if isRecording {
-                voiceBaseText = viewModel.inputText
-            }
-        }
         .onChange(of: voiceTranscriber.transcript) { _, newValue in
-            guard !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return
-            }
-            // Voice is known to be voice only once words actually arrive.
-            viewModel.inputKind = .voiceNote
-            viewModel.inputText = voiceBaseText.isEmpty
-                ? newValue
-                : voiceBaseText + "\n" + newValue
+            viewModel.mergeVoiceTranscript(newValue)
         }
     }
 
