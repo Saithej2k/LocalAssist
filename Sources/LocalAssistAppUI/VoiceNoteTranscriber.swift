@@ -136,6 +136,11 @@ public enum VoiceCaptureState: Equatable {
             // documented usage pattern for SFSpeechAudioBufferRecognitionRequest.
             let boxedRequest = UncheckedSendable(value: request)
             inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { @Sendable buffer, _ in
+                // Engine teardown can deliver one empty buffer; appending it
+                // makes CoreAudio log a zero-byte-size complaint.
+                guard buffer.frameLength > 0 else {
+                    return
+                }
                 boxedRequest.value.append(buffer)
             }
 
