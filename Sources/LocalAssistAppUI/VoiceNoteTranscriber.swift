@@ -3,7 +3,9 @@ import Foundation
 
 #if os(iOS) && canImport(AVFoundation) && canImport(Speech)
     import AVFoundation
-    import Speech
+    // Speech's callbacks predate strict concurrency; the framework's types
+    // are used carefully across actors below.
+    @preconcurrency import Speech
 #endif
 
 public enum VoiceCaptureState: Equatable {
@@ -97,11 +99,7 @@ public enum VoiceCaptureState: Equatable {
         }
 
         private nonisolated func microphoneAccessGranted() async -> Bool {
-            await withCheckedContinuation { continuation in
-                AVAudioSession.sharedInstance().requestRecordPermission { @Sendable allowed in
-                    continuation.resume(returning: allowed)
-                }
-            }
+            await AVAudioApplication.requestRecordPermission()
         }
 
         private func startAudioRecognition(localeIdentifier: String) throws {
@@ -133,9 +131,12 @@ public enum VoiceCaptureState: Equatable {
             // The audio tap fires on a realtime audio thread. Without
             // @Sendable the closure inherits MainActor isolation from this
             // class and Swift 6 traps in dispatch_assert_queue_fail the
-            // instant a buffer arrives.
-            inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { @Sendable [weak request] buffer, _ in
-                request?.append(buffer)
+            // instant a buffer arrives. The request crosses into the tap in
+            // an unchecked box: appending audio buffers off-main is the
+            // documented usage pattern for SFSpeechAudioBufferRecognitionRequest.
+            let boxedRequest = UncheckedSendable(value: request)
+            inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { @Sendable buffer, _ in
+                boxedRequest.value.append(buffer)
             }
 
             engine.prepare()
@@ -189,6 +190,12 @@ public enum VoiceCaptureState: Equatable {
             speechRecognizer = nil
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
+    }
+
+    /// Carries a non-Sendable value across an actor boundary the caller has
+    /// verified safe (e.g. audio-tap buffer appends).
+    private struct UncheckedSendable<T>: @unchecked Sendable {
+        let value: T
     }
 
     private enum VoiceCaptureError: Error, CustomStringConvertible {

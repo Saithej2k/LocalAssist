@@ -251,7 +251,9 @@ public struct LocalAssistHomeView: View {
 }
 
 /// Physical confirmation that recording started/stopped — trust cue for a
-/// capture tool. No-op off iOS.
+/// capture tool. No-op off iOS. Main-actor because the feedback generator
+/// is UI machinery; every call site is a view action anyway.
+@MainActor
 enum CaptureHaptics {
     static func recordStart() {
         #if os(iOS) && canImport(UIKit)
@@ -1574,6 +1576,9 @@ private struct OnboardingRow: View {
 
 private struct SettingsFormView: View {
     @ObservedObject var viewModel: LocalAssistViewModel
+    /// Cached so the O(history) markdown build runs on appearance and
+    /// history changes, not on every Form render.
+    @State private var historyExport = ""
 
     private var smartModeAvailable: Bool {
         viewModel.availability?.unavailability?.reason != .deviceNotEligible
@@ -1616,7 +1621,7 @@ private struct SettingsFormView: View {
             }
 
             Section {
-                ShareLink(item: viewModel.exportMarkdown()) {
+                ShareLink(item: historyExport) {
                     Label("Export history (Markdown)", systemImage: "square.and.arrow.up")
                 }
                 .disabled(viewModel.history.isEmpty)
@@ -1635,6 +1640,12 @@ private struct SettingsFormView: View {
             } footer: {
                 Text("History lives in a private JSON file in the app's container.")
             }
+        }
+        .onAppear {
+            historyExport = viewModel.exportMarkdown()
+        }
+        .onChange(of: viewModel.history) { _, _ in
+            historyExport = viewModel.exportMarkdown()
         }
     }
 
