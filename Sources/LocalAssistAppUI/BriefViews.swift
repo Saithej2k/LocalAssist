@@ -16,6 +16,8 @@ struct SummaryResultView: View {
                     Image(systemName: speaker.isSpeaking ? "stop.circle.fill" : "speaker.wave.2.fill")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(LocalAssistColors.accent)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(speaker.isSpeaking ? "Stop reading brief" : "Read brief aloud")

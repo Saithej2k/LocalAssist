@@ -33,16 +33,22 @@ public final class LocalAssistViewModel: ObservableObject {
     private var didPrewarmForCurrentSmartSession = false
     private static let defaultMaxSuggestions = 5
 
+    private static let smartModeDefaultsKey = "localassist.usesSmartModel"
+
     public init(
         inputText: String = "",
         inputKind: AssistantInputKind = .note,
-        usesSmartModel: Bool = false,
+        usesSmartModel: Bool? = nil,
         worker: LocalAssistWorker = LocalAssistWorker(),
         morningBrief: MorningBriefScheduler = MorningBriefScheduler()
     ) {
         self.inputText = inputText
         self.inputKind = inputKind
+        // Smart mode persists across launches so the model prewarms at
+        // startup instead of after the first toggle — the difference
+        // between a warm and a cold first generation.
         self.usesSmartModel = usesSmartModel
+            ?? UserDefaults.standard.bool(forKey: Self.smartModeDefaultsKey)
         refineInstruction = ""
         self.worker = worker
         self.morningBrief = morningBrief
@@ -151,6 +157,7 @@ public final class LocalAssistViewModel: ObservableObject {
 
     public func toggleSmartMode() {
         usesSmartModel.toggle()
+        UserDefaults.standard.set(usesSmartModel, forKey: Self.smartModeDefaultsKey)
         didPrewarmForCurrentSmartSession = false
         if usesSmartModel {
             prewarm()

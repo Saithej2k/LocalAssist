@@ -430,9 +430,10 @@ private struct InputComposerView: View {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 19))
                             .foregroundStyle(.secondary)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .padding(10)
                     .accessibilityLabel("Clear text")
                 }
             }
@@ -460,7 +461,7 @@ private struct InputComposerView: View {
                     } label: {
                         Image(systemName: voiceTranscriber.isRecording ? "stop.fill" : "mic.fill")
                             .font(.system(size: 20, weight: .bold))
-                            .frame(width: 30, height: 30)
+                            .frame(width: 36, height: 36)
                     }
                     .buttonStyle(.glassProminent)
                     .tint(voiceTranscriber.isRecording ? LocalAssistColors.danger : LocalAssistColors.accent)
@@ -476,7 +477,7 @@ private struct InputComposerView: View {
                             } label: {
                                 Image(systemName: "text.viewfinder")
                                     .font(.system(size: 18, weight: .semibold))
-                                    .frame(width: 30, height: 30)
+                                    .frame(width: 36, height: 36)
                             }
                             .buttonStyle(.glass)
                             .disabled(viewModel.isGenerating || voiceTranscriber.isRecording)

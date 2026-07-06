@@ -27,9 +27,20 @@ public enum VoiceCaptureState: Equatable {
         @Published public private(set) var errorMessage: String?
 
         private var audioEngine: AVAudioEngine?
-        private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
         private var recognitionTask: SFSpeechRecognitionTask?
         private var speechRecognizer: SFSpeechRecognizer?
+
+        /// The audio tap outlives any single recognition request: the
+        /// recognizer finalizes a segment after every ~3s pause, so dictation
+        /// is a chain of segment requests all fed by one relay.
+        private let requestRelay = RequestRelay()
+        /// Segments the recognizer has finalized, joined in order.
+        private var finalizedText = ""
+        /// The live partial hypothesis for the current segment.
+        private var currentSegment = ""
+        /// Consecutive error-driven segment restarts with no speech in
+        /// between — bounded so a dead recognizer cannot loop forever.
+        private var errorRestartCount = 0
 
         public init() {}
 
@@ -44,6 +55,9 @@ public enum VoiceCaptureState: Equatable {
 
             state = .requestingPermission
             transcript = ""
+            finalizedText = ""
+            currentSegment = ""
+            errorRestartCount = 0
             errorMessage = nil
 
             do {
@@ -63,7 +77,16 @@ public enum VoiceCaptureState: Equatable {
                 return
             }
 
-            stopAudio(cancelRecognition: false)
+            // Freeze exactly what the user watched appear. Cancelling the
+            // recognition (instead of waiting for a final) prevents the
+            // recognizer's post-hoc re-scoring from replacing a long
+            // transcript with a shorter final hypothesis.
+            finalizedText = Self.joined(finalizedText, currentSegment)
+            currentSegment = ""
+            if !finalizedText.isEmpty {
+                transcript = finalizedText
+            }
+            stopAudio(cancelRecognition: true)
             state = .idle
         }
 
@@ -116,11 +139,6 @@ public enum VoiceCaptureState: Equatable {
                 throw VoiceCaptureError.onDeviceRecognitionUnavailable
             }
 
-            let request = SFSpeechAudioBufferRecognitionRequest()
-            request.shouldReportPartialResults = true
-            request.requiresOnDeviceRecognition = true
-            request.addsPunctuation = true
-
             let audioSession = AVAudioSession.sharedInstance()
             try audioSession.setCategory(.record, mode: .measurement, options: [.duckOthers])
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
@@ -131,17 +149,16 @@ public enum VoiceCaptureState: Equatable {
             // The audio tap fires on a realtime audio thread. Without
             // @Sendable the closure inherits MainActor isolation from this
             // class and Swift 6 traps in dispatch_assert_queue_fail the
-            // instant a buffer arrives. The request crosses into the tap in
-            // an unchecked box: appending audio buffers off-main is the
-            // documented usage pattern for SFSpeechAudioBufferRecognitionRequest.
-            let boxedRequest = UncheckedSendable(value: request)
+            // instant a buffer arrives. The relay is the tap's only capture,
+            // and always points at the current segment's request.
+            let relay = requestRelay
             inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { @Sendable buffer, _ in
                 // Engine teardown can deliver one empty buffer; appending it
                 // makes CoreAudio log a zero-byte-size complaint.
                 guard buffer.frameLength > 0 else {
                     return
                 }
-                boxedRequest.value.append(buffer)
+                relay.request?.append(buffer)
             }
 
             engine.prepare()
@@ -149,35 +166,96 @@ public enum VoiceCaptureState: Equatable {
 
             speechRecognizer = recognizer
             audioEngine = engine
-            recognitionRequest = request
-            // Recognition results also arrive off-main; the handler must be
-            // @Sendable, with all state mutation hopping to the MainActor.
+            beginRecognitionSegment(recognizer: recognizer)
+        }
+
+        /// One recognition request per utterance segment: the recognizer
+        /// finalizes after every pause (~3s of silence), so continuous
+        /// dictation chains segments until the user taps stop. Nothing is
+        /// lost across pauses.
+        private func beginRecognitionSegment(recognizer: SFSpeechRecognizer) {
+            let request = SFSpeechAudioBufferRecognitionRequest()
+            request.shouldReportPartialResults = true
+            request.requiresOnDeviceRecognition = true
+            request.addsPunctuation = true
+            requestRelay.request = request
+
+            // Results arrive off-main; the handler must be @Sendable, with
+            // only Sendable values crossing to the MainActor.
             recognitionTask = recognizer.recognitionTask(with: request) { @Sendable [weak self] result, error in
-                // Pull Sendable values out before hopping actors — the raw
-                // SFSpeechRecognitionResult must not cross the boundary.
                 let latestTranscript = result?.bestTranscription.formattedString
                 let isFinal = result?.isFinal ?? false
-                let failureMessage = error?.localizedDescription
+                let nsError = error as NSError?
+                let errorCode = nsError?.code
+                let failureMessage = nsError?.localizedDescription
 
                 Task { @MainActor [weak self] in
-                    guard let self else {
-                        return
-                    }
-
-                    if let latestTranscript {
-                        transcript = latestTranscript
-                        if isFinal {
-                            stop()
-                        }
-                    }
-
-                    if let failureMessage, isRecording {
-                        stopAudio(cancelRecognition: true)
-                        errorMessage = failureMessage
-                        state = .unavailable(failureMessage)
-                    }
+                    self?.handleRecognition(
+                        latest: latestTranscript,
+                        isFinal: isFinal,
+                        errorCode: errorCode,
+                        failureMessage: failureMessage
+                    )
                 }
             }
+        }
+
+        private func handleRecognition(
+            latest: String?,
+            isFinal: Bool,
+            errorCode: Int?,
+            failureMessage: String?
+        ) {
+            guard isRecording else {
+                return
+            }
+
+            if let latest {
+                errorRestartCount = 0
+                if isFinal {
+                    // Mixed-language finals sometimes re-score to something
+                    // shorter than the partial the user watched appear —
+                    // keep whichever preserves more of their words.
+                    let segment = latest.count >= currentSegment.count ? latest : currentSegment
+                    finalizedText = Self.joined(finalizedText, segment)
+                    currentSegment = ""
+                    transcript = finalizedText
+                } else {
+                    currentSegment = latest
+                    transcript = Self.joined(finalizedText, latest)
+                }
+            }
+
+            if isFinal || errorCode != nil {
+                // Segment ended (pause finalization, "no speech detected",
+                // or a transient recognizer error). If audio is still
+                // flowing, chain straight into the next segment; a dead
+                // engine or a recognizer stuck in an error loop ends it.
+                if errorCode != nil, latest == nil {
+                    errorRestartCount += 1
+                }
+                if let recognizer = speechRecognizer,
+                   audioEngine?.isRunning == true,
+                   errorRestartCount <= 3 {
+                    beginRecognitionSegment(recognizer: recognizer)
+                } else if let failureMessage {
+                    stopAudio(cancelRecognition: true)
+                    errorMessage = failureMessage
+                    state = .unavailable(failureMessage)
+                }
+            }
+        }
+
+        private static func joined(_ lhs: String, _ rhs: String) -> String {
+            let left = lhs.trimmingCharacters(in: .whitespacesAndNewlines)
+            let right = rhs.trimmingCharacters(in: .whitespacesAndNewlines)
+            if left.isEmpty {
+                return right
+            }
+            if right.isEmpty {
+                return left
+            }
+            return left + " " + right
         }
 
         private func stopAudio(cancelRecognition: Bool) {
@@ -185,22 +263,23 @@ public enum VoiceCaptureState: Equatable {
                 audioEngine?.stop()
             }
             audioEngine?.inputNode.removeTap(onBus: 0)
-            recognitionRequest?.endAudio()
+            requestRelay.request?.endAudio()
             if cancelRecognition {
                 recognitionTask?.cancel()
             }
             recognitionTask = nil
-            recognitionRequest = nil
+            requestRelay.request = nil
             audioEngine = nil
             speechRecognizer = nil
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
     }
 
-    /// Carries a non-Sendable value across an actor boundary the caller has
-    /// verified safe (e.g. audio-tap buffer appends).
-    private struct UncheckedSendable<T>: @unchecked Sendable {
-        let value: T
+    /// Hands the current segment's recognition request to the realtime audio
+    /// tap. Mutated only on the main actor; the tap only appends buffers —
+    /// the documented usage pattern for SFSpeechAudioBufferRecognitionRequest.
+    private final class RequestRelay: @unchecked Sendable {
+        var request: SFSpeechAudioBufferRecognitionRequest?
     }
 
     private enum VoiceCaptureError: Error, CustomStringConvertible {

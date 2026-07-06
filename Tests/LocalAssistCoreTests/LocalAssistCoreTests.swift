@@ -766,6 +766,20 @@ final class LocalAssistCoreTests: XCTestCase {
         XCTAssertFalse(summary.tasks.isEmpty)
     }
 
+    func testChunkerHandlesDegenerateInput() {
+        XCTAssertEqual(TranscriptChunker.chunks(from: ""), [])
+        XCTAssertFalse(TranscriptChunker.chunks(from: "   \n  ").isEmpty)
+        XCTAssertEqual(TranscriptChunker.digest(of: []), "")
+    }
+
+    func testNormalizerRejectsEmptyPartial() {
+        XCTAssertNil(SummaryNormalizer().summary(
+            from: StructuredSummaryPartial(),
+            request: AssistantRequest(sourceText: "anything"),
+            availability: .available
+        ))
+    }
+
     func testTaskCompletionPersistsThroughHistoryStore() async throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("LocalAssist-\(UUID().uuidString)")
