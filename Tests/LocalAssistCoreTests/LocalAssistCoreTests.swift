@@ -766,6 +766,45 @@ final class LocalAssistCoreTests: XCTestCase {
         XCTAssertFalse(summary.tasks.isEmpty)
     }
 
+    // MARK: - Dictation accumulation
+
+    func testDictationSurvivesPausesEndedByErrorNotFinal() {
+        // The exact reported flow: speak, pause (the on-device recognizer
+        // ends the segment with "no speech detected" instead of a final),
+        // keep speaking. Earlier words must never disappear.
+        var dictation = DictationAccumulator()
+
+        dictation.updatePartial("Call Mom tonight")
+        dictation.updatePartial("Call Mom tonight, grab the birthday cake Saturday")
+        dictation.endSegmentWithoutFinal()
+        XCTAssertEqual(dictation.transcript, "Call Mom tonight, grab the birthday cake Saturday")
+
+        dictation.updatePartial("text Priya")
+        XCTAssertEqual(
+            dictation.transcript,
+            "Call Mom tonight, grab the birthday cake Saturday text Priya"
+        )
+
+        dictation.finalizeSegment("text Priya about brunch")
+        XCTAssertTrue(dictation.transcript.hasPrefix("Call Mom tonight, grab the birthday cake Saturday"))
+        XCTAssertTrue(dictation.transcript.hasSuffix("text Priya about brunch"))
+    }
+
+    func testDictationKeepsLongerHypothesisWhenFinalCollapses() {
+        // Mixed-language finals can re-score to something shorter than the
+        // partial the user watched appear; the longer text must win — this
+        // was the "stop cleared everything" report.
+        var dictation = DictationAccumulator()
+        dictation.updatePartial("Call Mom tonight and pay the electricity bill")
+        dictation.finalizeSegment("hi")
+        XCTAssertEqual(dictation.transcript, "Call Mom tonight and pay the electricity bill")
+
+        // A richer final (the usual case) is preferred over the partial.
+        dictation.updatePartial("book the dentist")
+        dictation.finalizeSegment("Book the dentist for next week.")
+        XCTAssertTrue(dictation.transcript.hasSuffix("Book the dentist for next week."))
+    }
+
     func testChunkerHandlesDegenerateInput() {
         XCTAssertEqual(TranscriptChunker.chunks(from: ""), [])
         XCTAssertFalse(TranscriptChunker.chunks(from: "   \n  ").isEmpty)

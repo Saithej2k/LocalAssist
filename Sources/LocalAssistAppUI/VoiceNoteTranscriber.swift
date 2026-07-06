@@ -34,10 +34,9 @@ public enum VoiceCaptureState: Equatable {
         /// recognizer finalizes a segment after every ~3s pause, so dictation
         /// is a chain of segment requests all fed by one relay.
         private let requestRelay = RequestRelay()
-        /// Segments the recognizer has finalized, joined in order.
-        private var finalizedText = ""
-        /// The live partial hypothesis for the current segment.
-        private var currentSegment = ""
+        /// Accumulates finalized segments + live partial; its "finalized
+        /// words are never lost" invariant is unit-tested in isolation.
+        private var accumulator = DictationAccumulator()
         /// Consecutive error-driven segment restarts with no speech in
         /// between — bounded so a dead recognizer cannot loop forever.
         private var errorRestartCount = 0
@@ -58,8 +57,7 @@ public enum VoiceCaptureState: Equatable {
 
             state = .requestingPermission
             transcript = ""
-            finalizedText = ""
-            currentSegment = ""
+            accumulator.reset()
             errorRestartCount = 0
             errorMessage = nil
 
@@ -84,10 +82,9 @@ public enum VoiceCaptureState: Equatable {
             // recognition (instead of waiting for a final) prevents the
             // recognizer's post-hoc re-scoring from replacing a long
             // transcript with a shorter final hypothesis.
-            finalizedText = Self.joined(finalizedText, currentSegment)
-            currentSegment = ""
-            if !finalizedText.isEmpty {
-                transcript = finalizedText
+            accumulator.endSegmentWithoutFinal()
+            if !accumulator.transcript.isEmpty {
+                transcript = accumulator.transcript
             }
             stopAudio(cancelRecognition: true)
             state = .idle
@@ -223,17 +220,11 @@ public enum VoiceCaptureState: Equatable {
             if let latest {
                 errorRestartCount = 0
                 if isFinal {
-                    // Mixed-language finals sometimes re-score to something
-                    // shorter than the partial the user watched appear —
-                    // keep whichever preserves more of their words.
-                    let segment = latest.count >= currentSegment.count ? latest : currentSegment
-                    finalizedText = Self.joined(finalizedText, segment)
-                    currentSegment = ""
-                    transcript = finalizedText
+                    accumulator.finalizeSegment(latest)
                 } else {
-                    currentSegment = latest
-                    transcript = Self.joined(finalizedText, latest)
+                    accumulator.updatePartial(latest)
                 }
+                transcript = accumulator.transcript
             }
 
             guard isFinal || errorCode != nil else {
@@ -245,11 +236,10 @@ public enum VoiceCaptureState: Equatable {
                 // detected" instead of a final result. No final means
                 // nothing folded the live partial — fold it here, or the
                 // next segment would overwrite everything already said.
-                let heardNothing = currentSegment.isEmpty && latest == nil
-                finalizedText = Self.joined(finalizedText, currentSegment)
-                currentSegment = ""
-                if !finalizedText.isEmpty {
-                    transcript = finalizedText
+                let heardNothing = accumulator.currentSegment.isEmpty && latest == nil
+                accumulator.endSegmentWithoutFinal()
+                if !accumulator.transcript.isEmpty {
+                    transcript = accumulator.transcript
                 }
                 if heardNothing {
                     errorRestartCount += 1
@@ -268,18 +258,6 @@ public enum VoiceCaptureState: Equatable {
                 errorMessage = failureMessage
                 state = .unavailable(failureMessage)
             }
-        }
-
-        private static func joined(_ lhs: String, _ rhs: String) -> String {
-            let left = lhs.trimmingCharacters(in: .whitespacesAndNewlines)
-            let right = rhs.trimmingCharacters(in: .whitespacesAndNewlines)
-            if left.isEmpty {
-                return right
-            }
-            if right.isEmpty {
-                return left
-            }
-            return left + " " + right
         }
 
         private func stopAudio(cancelRecognition: Bool) {
