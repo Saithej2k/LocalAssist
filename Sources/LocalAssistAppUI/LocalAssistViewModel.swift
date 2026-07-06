@@ -27,6 +27,10 @@ public final class LocalAssistViewModel: ObservableObject {
     private let morningBrief: MorningBriefScheduler
     private var generationTask: Task<Void, Never>?
     private var forceOfflineFallbackForNextRun = false
+    /// One prewarm per Smart-mode session — WWDC "Code-Along" pattern: fire
+    /// when the user gives a strong hint (starts typing) so time-to-first-
+    /// token is spent while they finish composing, not after Generate.
+    private var didPrewarmForCurrentSmartSession = false
     private static let defaultMaxSuggestions = 5
 
     public init(
@@ -62,12 +66,28 @@ public final class LocalAssistViewModel: ObservableObject {
     /// Loads the on-device model before the first smart request so
     /// time-to-first-token is spent while the user is still composing.
     public func prewarm() {
-        guard usesSmartModel else {
+        guard usesSmartModel, !didPrewarmForCurrentSmartSession else {
             return
         }
+        didPrewarmForCurrentSmartSession = true
         Task { [weak self] in
             await self?.worker.prewarm()
         }
+    }
+
+    /// Called when the input field or a chip changes. In Smart mode a
+    /// non-empty draft is the strongest hint the user will hit Generate soon,
+    /// so we prewarm now — matching the WWDC "text-field-triggered prewarm"
+    /// recipe. In Instant mode there is nothing to warm up.
+    public func inputChanged() {
+        guard usesSmartModel else {
+            return
+        }
+        let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return
+        }
+        prewarm()
     }
 
     public func refreshAvailability() {
@@ -132,6 +152,7 @@ public final class LocalAssistViewModel: ObservableObject {
 
     public func toggleSmartMode() {
         usesSmartModel.toggle()
+        didPrewarmForCurrentSmartSession = false
         if usesSmartModel {
             prewarm()
             refreshAvailability()
@@ -167,7 +188,10 @@ public final class LocalAssistViewModel: ObservableObject {
                     }
                     if let summary = update.summary {
                         finalSummary = summary
-                        self.availability = summary.diagnostics.availability
+                        // Deliberately not overwriting `availability` here:
+                        // it tracks the underlying Smart-mode model state
+                        // (for the header pill), not the fallback reason of
+                        // the just-completed run.
                     }
                 }
 
@@ -186,9 +210,11 @@ public final class LocalAssistViewModel: ObservableObject {
                 self.run = run
                 self.preparedActions = prepared
                 self.history = history
-                self.availability = run.summary.diagnostics.availability
                 self.isGenerating = false
                 await morningBrief.refresh(history: history)
+                // Re-query the true model state so the header pill and
+                // Settings sheet stay accurate after each run.
+                refreshAvailability()
             } catch is CancellationError {
                 self.isGenerating = false
                 self.generationMessage = "Cancelled"

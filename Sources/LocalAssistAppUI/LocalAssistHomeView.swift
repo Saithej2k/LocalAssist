@@ -28,6 +28,7 @@ public struct LocalAssistHomeView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     AppHeaderView(
                         usesSmartModel: viewModel.usesSmartModel,
+                        availability: viewModel.availability,
                         onToggle: { viewModel.toggleSmartMode() }
                     )
 
@@ -119,11 +120,17 @@ public struct LocalAssistHomeView: View {
         }
         .task {
             viewModel.prewarm()
+            viewModel.refreshAvailability()
             viewModel.loadHistory()
             runLaunchAutomationIfNeeded()
             if !hasOnboarded, ProcessInfo.processInfo.environment["LOCALASSIST_AUTO_RUN"] != "1" {
                 showsOnboarding = true
             }
+        }
+        // Prewarm the on-device model the moment the user starts typing —
+        // the WWDC "strong hint" heuristic. In Instant mode this is a no-op.
+        .onChange(of: viewModel.inputText) { _, _ in
+            viewModel.inputChanged()
         }
         .sheet(isPresented: $showsOnboarding, onDismiss: { hasOnboarded = true }) {
             OnboardingView {
@@ -212,6 +219,7 @@ extension LocalAssistHomeView {
 
 private struct AppHeaderView: View {
     var usesSmartModel: Bool
+    var availability: ModelAvailability?
     var onToggle: () -> Void
 
     var body: some View {
@@ -230,16 +238,30 @@ private struct AppHeaderView: View {
                 Spacer(minLength: 12)
             }
 
-            ModelModePill(usesSmartModel: usesSmartModel, onToggle: onToggle)
+            ModelModePill(
+                usesSmartModel: usesSmartModel,
+                availability: availability,
+                onToggle: onToggle
+            )
         }
     }
 }
 
 /// Both modes are 100% on-device; the toggle trades deterministic speed for
-/// model quality, never privacy.
+/// model quality, never privacy. Availability-driven behavior mirrors the
+/// WWDC "Code-Along" recipe:
+/// - `.deviceNotEligible`: hide the Smart affordance entirely so users don't
+///   go down a path their device can't support.
+/// - `.appleIntelligenceNotEnabled`: offer a soft "Enable" hint.
+/// - `.modelNotReady`: label the button "Try again soon".
 private struct ModelModePill: View {
     var usesSmartModel: Bool
+    var availability: ModelAvailability?
     var onToggle: () -> Void
+
+    private var unavailabilityReason: ModelUnavailabilityReason? {
+        availability?.unavailability?.reason
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -259,14 +281,18 @@ private struct ModelModePill: View {
 
             Spacer(minLength: 8)
 
-            Button {
-                onToggle()
-            } label: {
-                Text(usesSmartModel ? "Use Instant" : "Use Smart")
-                    .font(.system(.caption, design: .rounded, weight: .bold))
+            // Skip the Smart affordance entirely on ineligible devices.
+            if unavailabilityReason != .deviceNotEligible {
+                Button {
+                    onToggle()
+                } label: {
+                    Text(toggleTitle)
+                        .font(.system(.caption, design: .rounded, weight: .bold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(LocalAssistColors.accent)
+                .disabled(unavailabilityReason == .modelNotReady && !usesSmartModel)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(LocalAssistColors.accent)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
@@ -275,7 +301,28 @@ private struct ModelModePill: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(LocalAssistColors.border.opacity(0.55))
         }
-        .accessibilityLabel(usesSmartModel ? "Smart brief mode, on-device AI, private" : "Instant brief mode, rule-based, private")
+        .accessibilityLabel(accessibilityDescription)
+    }
+
+    private var toggleTitle: String {
+        if usesSmartModel {
+            return "Use Instant"
+        }
+        switch unavailabilityReason {
+        case .appleIntelligenceNotEnabled:
+            return "Enable Smart"
+        case .modelNotReady:
+            return "Preparing…"
+        default:
+            return "Use Smart"
+        }
+    }
+
+    private var accessibilityDescription: String {
+        if usesSmartModel {
+            return "Smart brief mode, on-device AI, private"
+        }
+        return "Instant brief mode, rule-based, private"
     }
 }
 
@@ -1618,17 +1665,35 @@ private struct SettingsSheetView: View {
     @ObservedObject var viewModel: LocalAssistViewModel
     @Environment(\.dismiss) private var dismiss
 
+    private var smartModeAvailable: Bool {
+        viewModel.availability?.unavailability?.reason != .deviceNotEligible
+    }
+
+    private var processingFooter: String {
+        let baseline = "Both modes run entirely on this phone. Smart uses Apple's on-device model for richer briefs; Instant uses deterministic rules and works on every device."
+        guard let unavailability = viewModel.availability?.unavailability else {
+            return baseline
+        }
+        return "\(baseline)\n\n\(unavailability.userGuidance)"
+    }
+
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    Toggle(isOn: smartModeBinding) {
-                        Label("Smart brief (on-device AI)", systemImage: "brain.head.profile")
+                    if smartModeAvailable {
+                        Toggle(isOn: smartModeBinding) {
+                            Label("Smart brief (on-device AI)", systemImage: "brain.head.profile")
+                        }
+                        .disabled(viewModel.availability?.unavailability?.reason == .modelNotReady)
+                    } else {
+                        Label("Smart brief not supported on this device", systemImage: "brain.head.profile")
+                            .foregroundStyle(.secondary)
                     }
                 } header: {
                     Text("Processing")
                 } footer: {
-                    Text("Both modes run entirely on this phone. Smart uses Apple's on-device model for richer briefs; Instant uses deterministic rules and works on every device — even with the model unavailable.")
+                    Text(processingFooter)
                 }
 
                 Section {
