@@ -2,12 +2,14 @@ import UIKit
 import UniformTypeIdentifiers
 
 /// Capture from anywhere: select text in Mail/Safari/Notes → Share →
-/// LocalAssist. The text is appended to the app-group inbox and the app
+/// LocalAssist. The text is appended to the app-group inbox file and the app
 /// drains it into the capture box on next open. Nothing is uploaded — the
 /// extension writes one string to shared local storage and closes.
+/// A file, not group UserDefaults: touching a group preferences suite makes
+/// cfprefsd log a kCFPreferencesAnyUser complaint on device. The path must
+/// match `RunHistoryStore.pendingCaptureFileURL` in the app.
 final class ShareViewController: UIViewController {
     private static let appGroupIdentifier = "group.com.saithej.localassist"
-    private static let inboxKey = "localassist.pendingCaptureText"
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -60,13 +62,20 @@ final class ShareViewController: UIViewController {
 
         let combined = pieces.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !combined.isEmpty,
-              let defaults = UserDefaults(suiteName: Self.appGroupIdentifier)
+              let container = FileManager.default.containerURL(
+                  forSecurityApplicationGroupIdentifier: Self.appGroupIdentifier
+              )
         else {
             return
         }
 
-        let existing = defaults.string(forKey: Self.inboxKey) ?? ""
-        defaults.set(existing.isEmpty ? combined : existing + "\n" + combined, forKey: Self.inboxKey)
+        let directory = container.appendingPathComponent("LocalAssist", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fileURL = directory.appendingPathComponent("pending-capture.txt")
+
+        let existing = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
+        let merged = existing.isEmpty ? combined : existing + "\n" + combined
+        try? merged.write(to: fileURL, atomically: true, encoding: .utf8)
     }
 
     private func loadString(from provider: NSItemProvider, type: UTType) async throws -> String? {

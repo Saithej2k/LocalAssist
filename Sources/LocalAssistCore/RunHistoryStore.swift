@@ -44,6 +44,17 @@ public actor RunHistoryStore {
         SharedContainerCache.resolvedFileURL() != nil
     }
 
+    /// Share-extension handoff file inside the app-group container, next to
+    /// the history store. A plain file instead of group `UserDefaults`:
+    /// merely touching a group preferences suite makes cfprefsd log a
+    /// kCFPreferencesAnyUser complaint on device, provisioned or not.
+    /// The name must match what `ShareViewController` writes.
+    public static var pendingCaptureFileURL: URL? {
+        SharedContainerCache.resolvedFileURL()?
+            .deletingLastPathComponent()
+            .appendingPathComponent("pending-capture.txt")
+    }
+
     /// Preferred store: the app-group container so widgets and extensions can
     /// read the same history. Falls back to Application Support when the
     /// group container is unavailable (tests, CLI, unsigned builds), with a

@@ -5,24 +5,20 @@ import LocalAssistCore
 #endif
 
 /// Hand-off mailbox between the share extension and the app: the extension
-/// appends shared text into app-group defaults; the app drains it into the
-/// capture box on next foreground. Plain UserDefaults is enough — the data is
-/// a single pending string and never leaves the device.
+/// appends shared text into a plain file in the app-group container; the app
+/// drains it into the capture box on next foreground. A file, not group
+/// UserDefaults — touching a group preferences suite makes cfprefsd log a
+/// kCFPreferencesAnyUser complaint on device even when the group provisions.
 public enum PendingCaptureInbox {
-    public static let key = "localassist.pendingCaptureText"
-
     public static func drain() -> String? {
-        // Without a provisioned app group (free personal teams) the suite
-        // is unusable and merely asking for it logs a cfprefsd complaint
-        // on every foreground — skip straight out.
-        guard RunHistoryStore.isSharedContainerAvailable,
-              let defaults = UserDefaults(suiteName: RunHistoryStore.appGroupIdentifier),
-              let text = defaults.string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines),
+        guard let fileURL = RunHistoryStore.pendingCaptureFileURL,
+              let text = (try? String(contentsOf: fileURL, encoding: .utf8))?
+              .trimmingCharacters(in: .whitespacesAndNewlines),
               !text.isEmpty
         else {
             return nil
         }
-        defaults.removeObject(forKey: key)
+        try? FileManager.default.removeItem(at: fileURL)
         return text
     }
 }

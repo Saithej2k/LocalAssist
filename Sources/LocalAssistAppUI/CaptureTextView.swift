@@ -1,5 +1,4 @@
 #if os(iOS)
-    import AVFoundation
     import SwiftUI
     import UIKit
 
@@ -17,15 +16,14 @@
         /// Incremented by the Scan button; each bump opens the system camera.
         @Binding var scanRequestCount: Int
 
-        /// The system scan flow needs a camera; hide the affordance in the
-        /// simulator and on devices without one. Resolved once — probing
-        /// AVCaptureDevice per body evaluation spams CoreMedia (Fig) logs,
-        /// and even a single probe logs on the camera-less simulator, so
-        /// that case is decided at compile time.
+        /// The system scan flow needs a camera. Every iPhone and iPad has
+        /// one, so this is a compile-time constant: probing AVCaptureDevice
+        /// — even once — logs CoreMedia (Fig) errors at launch, and the
+        /// system Scan Text UI copes gracefully if a camera is ever absent.
         #if targetEnvironment(simulator)
             static let supportsCameraScan = false
         #else
-            static let supportsCameraScan: Bool = AVCaptureDevice.default(for: .video) != nil
+            static let supportsCameraScan = true
         #endif
 
         func makeCoordinator() -> Coordinator {
