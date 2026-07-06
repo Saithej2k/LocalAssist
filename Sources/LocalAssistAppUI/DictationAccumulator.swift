@@ -40,8 +40,26 @@ public struct DictationAccumulator: Equatable, Sendable {
     public mutating func finalizeSegment(_ text: String?) {
         let final = text ?? ""
         let segment = final.count >= currentSegment.count ? final : currentSegment
-        finalizedText = Self.joined(finalizedText, segment)
         currentSegment = ""
+        fold(segment)
+    }
+
+    /// A final that arrived late, from a segment the pipeline has already
+    /// moved past. On iOS 26 the on-device recognizer often sends the
+    /// pause error first and the utterance's only text afterwards — these
+    /// late finals are the sole carrier of the words and must fold in.
+    public mutating func foldCompletedSegment(_ text: String) {
+        fold(text)
+    }
+
+    private mutating func fold(_ segment: String) {
+        let trimmed = segment.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Dedupe exact repeats: the same final can be delivered more than
+        // once across callback paths.
+        guard !trimmed.isEmpty, !finalizedText.hasSuffix(trimmed) else {
+            return
+        }
+        finalizedText = Self.joined(finalizedText, trimmed)
     }
 
     /// Segment ended without a final (pause "no speech detected", transient

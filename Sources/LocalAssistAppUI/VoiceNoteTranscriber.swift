@@ -67,7 +67,7 @@ public enum VoiceCaptureState: Equatable {
 
             do {
                 try await requestPermissions()
-                try startAudioRecognition(localeIdentifier: localeIdentifier)
+                try await startAudioRecognition(localeIdentifier: localeIdentifier)
                 state = .recording
             } catch {
                 stopAudio(cancelRecognition: true)
@@ -130,7 +130,7 @@ public enum VoiceCaptureState: Equatable {
             await AVAudioApplication.requestRecordPermission()
         }
 
-        private func startAudioRecognition(localeIdentifier: String) throws {
+        private func startAudioRecognition(localeIdentifier: String) async throws {
             stopAudio(cancelRecognition: true)
 
             let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeIdentifier))
@@ -144,33 +144,35 @@ public enum VoiceCaptureState: Equatable {
                 throw VoiceCaptureError.onDeviceRecognitionUnavailable
             }
 
-            let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.record, mode: .measurement, options: [.duckOthers])
-            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-
-            let engine = AVAudioEngine()
-            let inputNode = engine.inputNode
-            let recordingFormat = inputNode.outputFormat(forBus: 0)
-            // The audio tap fires on a realtime audio thread. Without
-            // @Sendable the closure inherits MainActor isolation from this
-            // class and Swift 6 traps in dispatch_assert_queue_fail the
-            // instant a buffer arrives. The relay is the tap's only capture,
-            // and always points at the current segment's request.
+            // Session activation and engine startup block for hundreds of
+            // milliseconds — off the main thread (this was the mic-tap
+            // hang the hang detector flagged). The tap closure is
+            // @Sendable and captures only the relay.
             let relay = requestRelay
-            inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { @Sendable buffer, _ in
-                // Engine teardown can deliver one empty buffer; appending it
-                // makes CoreAudio log a zero-byte-size complaint.
-                guard buffer.frameLength > 0 else {
-                    return
-                }
-                relay.request?.append(buffer)
-            }
+            let engineBox = try await Task.detached(priority: .userInitiated) { () -> UncheckedSendable<AVAudioEngine> in
+                let audioSession = AVAudioSession.sharedInstance()
+                try audioSession.setCategory(.record, mode: .measurement, options: [.duckOthers])
+                try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
 
-            engine.prepare()
-            try engine.start()
+                let engine = AVAudioEngine()
+                let inputNode = engine.inputNode
+                let recordingFormat = inputNode.outputFormat(forBus: 0)
+                inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { @Sendable buffer, _ in
+                    // Engine teardown can deliver one empty buffer; appending
+                    // it makes CoreAudio log a zero-byte-size complaint.
+                    guard buffer.frameLength > 0 else {
+                        return
+                    }
+                    relay.request?.append(buffer)
+                }
+
+                engine.prepare()
+                try engine.start()
+                return UncheckedSendable(value: engine)
+            }.value
 
             speechRecognizer = recognizer
-            audioEngine = engine
+            audioEngine = engineBox.value
             beginRecognitionSegment(recognizer: recognizer)
         }
 
@@ -217,25 +219,34 @@ public enum VoiceCaptureState: Equatable {
             errorCode: Int?,
             failureMessage: String?
         ) {
-            // Callbacks from a superseded segment (late finals, cancel
-            // errors) must not touch the transcript or spawn restarts.
-            guard isRecording, generation == segmentGeneration else {
-                Self.log.info("dropped stale callback: gen=\(generation) vs \(self.segmentGeneration), recording=\(self.isRecording)")
+            guard isRecording else {
                 return
             }
+            let isCurrentSegment = generation == segmentGeneration
 
             if let latest {
                 errorRestartCount = 0
                 if isFinal {
-                    accumulator.finalizeSegment(latest)
-                    Self.log.info("final: gen=\(generation), segment=\(latest.count) chars, total=\(self.accumulator.transcript.count)")
-                } else {
+                    if isCurrentSegment {
+                        accumulator.finalizeSegment(latest)
+                    } else {
+                        // On-device recognition often withholds partials and
+                        // sends the pause error before the utterance's text.
+                        // This late final is the only carrier of the words —
+                        // fold it; dropping it lost whole phrases.
+                        accumulator.foldCompletedSegment(latest)
+                    }
+                    Self.log.info("final: gen=\(generation) (live=\(isCurrentSegment)), segment=\(latest.count) chars, total=\(self.accumulator.transcript.count)")
+                } else if isCurrentSegment {
                     accumulator.updatePartial(latest)
                 }
                 transcript = accumulator.transcript
             }
 
-            guard isFinal || errorCode != nil else {
+            // Control flow — chaining and error handling — belongs to the
+            // live segment only; stale callbacks may contribute text above
+            // but never restarts.
+            guard isCurrentSegment, isFinal || errorCode != nil else {
                 return
             }
 
@@ -291,6 +302,12 @@ public enum VoiceCaptureState: Equatable {
     /// the documented usage pattern for SFSpeechAudioBufferRecognitionRequest.
     private final class RequestRelay: @unchecked Sendable {
         var request: SFSpeechAudioBufferRecognitionRequest?
+    }
+
+    /// Carries a non-Sendable value across a boundary the caller has
+    /// verified safe (engine handed back from its setup task).
+    private struct UncheckedSendable<T>: @unchecked Sendable {
+        let value: T
     }
 
     private enum VoiceCaptureError: Error, CustomStringConvertible {
