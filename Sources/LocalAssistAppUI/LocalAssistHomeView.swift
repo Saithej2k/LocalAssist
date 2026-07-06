@@ -22,7 +22,6 @@ public struct LocalAssistHomeView: View {
     @State private var selectedTab: AppTab = .capture
     @State private var didRunLaunchAutomation = false
     @State private var showsSettings = false
-    @State private var showsScanner = false
     @State private var showsOnboarding = false
     @AppStorage("localassist.hasOnboarded") private var hasOnboarded = false
     @Environment(\.openURL) private var openURL
@@ -36,7 +35,7 @@ public struct LocalAssistHomeView: View {
         TabView(selection: $selectedTab) {
             captureTab
                 .tabItem {
-                    Label("Capture", systemImage: "mic.fill")
+                    Label("Capture", systemImage: "square.and.pencil")
                 }
                 .tag(AppTab.capture)
 
@@ -96,88 +95,79 @@ public struct LocalAssistHomeView: View {
     // MARK: - Tabs
 
     private var captureTab: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    ModelModePill(
-                        usesSmartModel: viewModel.usesSmartModel,
-                        availability: viewModel.availability,
-                        onToggle: { viewModel.toggleSmartMode() }
-                    )
-
-                    // Capture comes first: pocket-to-captured in seconds.
-                    InputComposerView(
-                        viewModel: viewModel,
-                        voiceTranscriber: voiceTranscriber,
-                        onScan: { showsScanner = true }
-                    )
-
-                    if viewModel.isGenerating {
-                        ProgressPanel(
-                            phase: viewModel.generationPhase,
-                            message: viewModel.generationMessage,
-                            partial: viewModel.streamingPartial
-                        )
-                    }
-
-                    if let errorMessage = viewModel.errorMessage {
-                        StatusPanel(
-                            symbol: "exclamationmark.triangle.fill",
-                            title: "Could not create brief",
-                            message: errorMessage,
-                            tint: .red
-                        )
-                    }
-
-                    if let run = viewModel.run {
-                        ActionReviewView(
-                            actions: viewModel.preparedActions,
-                            executed: viewModel.executedActions,
-                            onConfirm: { action in
-                                viewModel.confirmAction(action)
-                                if let url = LocalAssistViewModel.draftHandoffURL(for: action) {
-                                    openURL(url)
-                                }
-                            }
-                        )
-                        SummaryResultView(run: run)
-                        if run.summary.source == .foundationModels {
-                            RefineBarView(viewModel: viewModel)
-                        }
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 18)
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .background(LocalAssistColors.canvas)
-            // Native large title instead of a second in-content header —
-            // one "local assist", the system way.
-            .navigationTitle("local assist")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                // Compact top-left header: app name where every app puts it,
+                // settings on the trailing edge, no dead navigation chrome.
+                HStack(alignment: .center) {
+                    Text("local assist")
+                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                    Spacer(minLength: 12)
                     Button {
                         showsSettings = true
                     } label: {
                         Image(systemName: "gearshape")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(width: 26, height: 26)
                     }
+                    .buttonStyle(.glass)
                     .accessibilityLabel("Settings")
                 }
-            }
-            .sheet(isPresented: $showsSettings) {
-                SettingsSheetView(viewModel: viewModel)
-            }
-            .sheet(isPresented: $showsScanner) {
-                ScanCaptureSheet { text in
-                    guard !text.isEmpty else {
-                        return
+
+                ModelModePill(
+                    usesSmartModel: viewModel.usesSmartModel,
+                    availability: viewModel.availability,
+                    onToggle: { viewModel.toggleSmartMode() }
+                )
+
+                // Capture comes first: pocket-to-captured in seconds.
+                InputComposerView(
+                    viewModel: viewModel,
+                    voiceTranscriber: voiceTranscriber
+                )
+
+                if viewModel.isGenerating {
+                    ProgressPanel(
+                        phase: viewModel.generationPhase,
+                        message: viewModel.generationMessage,
+                        partial: viewModel.streamingPartial
+                    )
+                }
+
+                if let errorMessage = viewModel.errorMessage {
+                    StatusPanel(
+                        symbol: "exclamationmark.triangle.fill",
+                        title: "Could not create brief",
+                        message: errorMessage,
+                        tint: .red
+                    )
+                }
+
+                if let run = viewModel.run {
+                    ActionReviewView(
+                        actions: viewModel.preparedActions,
+                        executed: viewModel.executedActions,
+                        onConfirm: { action in
+                            viewModel.confirmAction(action)
+                            if let url = LocalAssistViewModel.draftHandoffURL(for: action) {
+                                openURL(url)
+                            }
+                        }
+                    )
+                    SummaryResultView(run: run)
+                    if run.summary.source == .foundationModels {
+                        RefineBarView(viewModel: viewModel)
                     }
-                    viewModel.inputKind = .note
-                    viewModel.inputText = viewModel.inputText.isEmpty
-                        ? text
-                        : viewModel.inputText + "\n" + text
                 }
             }
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+            .padding(.bottom, 18)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .background(LocalAssistColors.canvas)
+        .sheet(isPresented: $showsSettings) {
+            SettingsSheetView(viewModel: viewModel)
         }
     }
 
@@ -255,7 +245,6 @@ public struct LocalAssistHomeView: View {
             return
         }
         CaptureHaptics.recordStart()
-        viewModel.markExternalCaptureRequested()
         Task {
             await voiceTranscriber.start()
         }
@@ -514,8 +503,15 @@ private struct TodayMetric: View {
 private struct InputComposerView: View {
     @ObservedObject var viewModel: LocalAssistViewModel
     @ObservedObject var voiceTranscriber: VoiceNoteTranscriber
-    var onScan: () -> Void
-    @FocusState private var editorFocused: Bool
+    #if os(iOS)
+        @State private var isEditorFocused = false
+        @State private var scanRequestCount = 0
+    #else
+        @FocusState private var editorFocused: Bool
+    #endif
+    /// Text that was already in the box when recording started, so dictation
+    /// appends to typed notes instead of overwriting them.
+    @State private var voiceBaseText = ""
 
     private var hasText: Bool {
         !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -524,23 +520,21 @@ private struct InputComposerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             ZStack(alignment: .topLeading) {
-                TextEditor(text: $viewModel.inputText)
-                    .font(.system(.body, design: .rounded))
-                    .frame(minHeight: 150)
-                    .padding(12)
-                    .scrollContentBackground(.hidden)
-                    .focused($editorFocused)
-                    // The system "Done" affordance: TextEditor has no return
-                    // key to dismiss with, so give the keyboard a toolbar.
-                    .toolbar {
-                        ToolbarItemGroup(placement: .keyboard) {
-                            Spacer()
-                            Button("Done") {
-                                editorFocused = false
-                            }
-                            .font(.system(.body, design: .rounded, weight: .semibold))
-                        }
-                    }
+                #if os(iOS)
+                    CaptureTextView(
+                        text: $viewModel.inputText,
+                        isFocused: $isEditorFocused,
+                        scanRequestCount: $scanRequestCount
+                    )
+                    .frame(minHeight: 170)
+                #else
+                    TextEditor(text: $viewModel.inputText)
+                        .font(.system(.body, design: .rounded))
+                        .frame(minHeight: 170)
+                        .padding(12)
+                        .scrollContentBackground(.hidden)
+                        .focused($editorFocused)
+                #endif
 
                 if !hasText {
                     Text("What's on your mind? Tasks, meeting notes, errands — say it, scan it, or type it.")
@@ -562,6 +556,7 @@ private struct InputComposerView: View {
                     Button {
                         viewModel.inputText = ""
                         viewModel.inputKind = .note
+                        voiceBaseText = ""
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 19))
@@ -573,7 +568,10 @@ private struct InputComposerView: View {
                 }
             }
 
-            if voiceTranscriber.isRecording || voiceTranscriber.state == .requestingPermission || !voiceTranscriber.transcript.isEmpty || voiceTranscriber.errorMessage != nil {
+            // Live feedback only: while listening, waiting on permission, or
+            // when something went wrong. The finished transcript lives in the
+            // text box — no lingering status bar repeating it.
+            if voiceTranscriber.isRecording || voiceTranscriber.state == .requestingPermission || voiceTranscriber.errorMessage != nil {
                 CompactVoiceStatusView(transcriber: voiceTranscriber)
             }
 
@@ -586,7 +584,6 @@ private struct InputComposerView: View {
                             voiceTranscriber.stop()
                         } else {
                             CaptureHaptics.recordStart()
-                            viewModel.inputKind = .voiceNote
                             Task {
                                 await voiceTranscriber.start()
                             }
@@ -602,14 +599,20 @@ private struct InputComposerView: View {
                     .accessibilityLabel(voiceTranscriber.isRecording ? "Stop voice capture" : "Start voice capture")
 
                     #if os(iOS)
-                        Button(action: onScan) {
-                            Image(systemName: "doc.viewfinder")
-                                .font(.system(size: 18, weight: .semibold))
-                                .frame(width: 30, height: 30)
+                        // System "Scan Text" camera (the AutoFill flow) —
+                        // live Live Text straight into the box.
+                        if CaptureTextView.supportsCameraScan {
+                            Button {
+                                scanRequestCount += 1
+                            } label: {
+                                Image(systemName: "text.viewfinder")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .frame(width: 30, height: 30)
+                            }
+                            .buttonStyle(.glass)
+                            .disabled(viewModel.isGenerating || voiceTranscriber.isRecording)
+                            .accessibilityLabel("Scan text with the camera")
                         }
-                        .buttonStyle(.glass)
-                        .disabled(viewModel.isGenerating || voiceTranscriber.isRecording)
-                        .accessibilityLabel("Scan text with the camera")
                     #endif
 
                     Spacer(minLength: 0)
@@ -626,28 +629,46 @@ private struct InputComposerView: View {
                         .accessibilityLabel("Cancel generation")
                     } else {
                         Button {
-                            editorFocused = false
+                            dismissEditor()
                             viewModel.summarize()
                         } label: {
-                            Label("Capture", systemImage: "sparkles")
+                            Label("Generate", systemImage: "sparkles")
                                 .font(.system(.body, design: .rounded, weight: .bold))
                                 .frame(height: 30)
                         }
                         .buttonStyle(.glassProminent)
                         .tint(LocalAssistColors.accent)
                         .disabled(voiceTranscriber.isRecording || !hasText)
-                        .accessibilityLabel("Capture and review actions")
+                        .accessibilityLabel("Generate brief and review actions")
                     }
                 }
+            }
+        }
+        // Snapshot the box the moment any recording starts — mic button,
+        // App Shortcut, or Lock Screen widget all flow through here.
+        .onChange(of: voiceTranscriber.isRecording) { _, isRecording in
+            if isRecording {
+                voiceBaseText = viewModel.inputText
             }
         }
         .onChange(of: voiceTranscriber.transcript) { _, newValue in
             guard !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 return
             }
+            // Voice is known to be voice only once words actually arrive.
             viewModel.inputKind = .voiceNote
-            viewModel.inputText = newValue
+            viewModel.inputText = voiceBaseText.isEmpty
+                ? newValue
+                : voiceBaseText + "\n" + newValue
         }
+    }
+
+    private func dismissEditor() {
+        #if os(iOS)
+            isEditorFocused = false
+        #else
+            editorFocused = false
+        #endif
     }
 }
 

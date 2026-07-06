@@ -116,12 +116,6 @@ public final class LocalAssistViewModel: ObservableObject {
         }
     }
 
-    /// Starts (or stops) a voice capture initiated from outside the view —
-    /// the "Capture a thought" App Shortcut or the Lock Screen widget.
-    public func markExternalCaptureRequested() {
-        inputKind = .voiceNote
-    }
-
     public func summarize() {
         // The user never picks a capture kind: voice input keeps its kind,
         // typed or scanned text is classified from its own content.
