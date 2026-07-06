@@ -205,6 +205,47 @@ public final class LocalAssistViewModel: ObservableObject {
         }
     }
 
+    /// Flips a task's done-state and persists it into history.
+    public func toggleTask(runID: String, task: TaskSuggestion) {
+        Task { [weak self] in
+            guard let self else { return }
+            let currentlyDone = history.first(where: { $0.id == runID })?.isCompleted(task)
+                ?? (run?.id == runID ? run?.isCompleted(task) : nil)
+                ?? false
+
+            let updated = await worker.setTask(task.id, completed: !currentlyDone, inRun: runID)
+            self.history = updated
+            if var current = self.run, current.id == runID {
+                if currentlyDone {
+                    current.completedTaskIDs.remove(task.id)
+                } else {
+                    current.completedTaskIDs.insert(task.id)
+                }
+                self.run = current
+            }
+            await morningBrief.refresh(history: updated)
+        }
+    }
+
+    /// Mail composer URL for a confirmed message draft, so the handoff opens
+    /// a real composer instead of ending at a simulated result.
+    public nonisolated static func draftHandoffURL(for action: PreparedToolAction) -> URL? {
+        guard action.draft.kind == .messageDraft else {
+            return nil
+        }
+        let subject = action.draft.payload["subject"] ?? action.draft.payload["title"] ?? action.draft.title
+        let body = action.draft.payload["body"] ?? action.draft.payload["notes"] ?? ""
+
+        var components = URLComponents()
+        components.scheme = "mailto"
+        components.path = ""
+        components.queryItems = [
+            URLQueryItem(name: "subject", value: subject),
+            URLQueryItem(name: "body", value: body),
+        ]
+        return components.url
+    }
+
     /// Executes a staged action after the user's explicit confirmation tap.
     public func confirmAction(_ action: PreparedToolAction) {
         Task { [weak self] in
@@ -249,6 +290,33 @@ public final class LocalAssistViewModel: ObservableObject {
         }
     }
 
+    /// Markdown export of the entire local history — the data is the user's.
+    public func exportMarkdown() -> String {
+        var lines = ["# LocalAssist history", ""]
+        let formatter = ISO8601DateFormatter()
+        for run in history {
+            lines.append("## \(run.summary.headline)")
+            lines.append("*\(formatter.string(from: run.summary.generatedAt)) · \(run.request.inputKind.rawValue) · \(run.summary.source == .foundationModels ? "on-device model" : "rules engine")*")
+            lines.append("")
+            for point in run.summary.keyPoints {
+                lines.append("- \(point)")
+            }
+            if !run.summary.tasks.isEmpty {
+                lines.append("")
+                for task in run.summary.tasks {
+                    let done = run.isCompleted(task) ? "x" : " "
+                    var line = "- [\(done)] \(task.title)"
+                    if let due = task.iso8601DueDate ?? task.dueHint {
+                        line += " (due \(due))"
+                    }
+                    lines.append(line)
+                }
+            }
+            lines.append("")
+        }
+        return lines.joined(separator: "\n")
+    }
+
     public static let sampleInput = """
     Review the onboarding doc, send Mira the blockers by Friday, and schedule a design sync next week. \
     Update the launch checklist before the beta build ships.
@@ -267,7 +335,7 @@ public actor LocalAssistWorker {
     public init(
         actionPreparer: any ToolActionPreparing = DraftOnlyToolActionPreparer(),
         actionExecutor: (any ToolActionExecuting)? = nil,
-        historyStore: RunHistoryStore? = RunHistoryStore.applicationSupportOrNil()
+        historyStore: RunHistoryStore? = RunHistoryStore.sharedOrLocal()
     ) {
         let counter = ToolInvocationCounter()
         let summarizer = LocalAssistLiveFactory.makeSummarizer(
@@ -354,11 +422,24 @@ public actor LocalAssistWorker {
         return (try? await historyStore.load()) ?? []
     }
 
+    public func setTask(_ taskID: String, completed: Bool, inRun runID: String) async -> [AssistantRun] {
+        guard let historyStore else {
+            return []
+        }
+        if let updated = try? await historyStore.setTask(taskID, completed: completed, inRun: runID) {
+            LocalAssistWidgetRefresher.refresh()
+            return updated
+        }
+        return (try? await historyStore.load()) ?? []
+    }
+
     public func record(_ run: AssistantRun) async -> [AssistantRun] {
         guard let historyStore else {
             return [run]
         }
-        return (try? await historyStore.append(run)) ?? [run]
+        let updated = (try? await historyStore.append(run)) ?? [run]
+        LocalAssistWidgetRefresher.refresh()
+        return updated
     }
 
     public func clearHistory() async {

@@ -59,9 +59,12 @@ The engine details that matter:
 ## System integration
 
 - **Siri & Shortcuts** — *"Capture a thought with LocalAssist"* opens straight into a live recording; summaries are exposed as App Entities so Shortcuts can chain them into other apps.
-- **Lock Screen & Home Screen widgets** — one-tap capture via a WidgetKit extension and the `localassist://capture` deep link.
-- **Interactive snippet confirmation** — reminder creation from Siri/Spotlight shows a preview card and writes only after confirmation.
-- **Morning brief** — an opt-in, fully local notification each morning: what's due today and what you captured yesterday.
+- **Spotlight** — briefs are donated as `IndexedEntity` content, searchable from system search today and pre-adopted for Siri personal-context integration.
+- **Capture from anywhere** — a share extension (select text in any app → Share → LocalAssist), a camera **Scan** mode (Live Text for whiteboards, receipts, handwriting), voice, or paste.
+- **Widgets** — one-tap capture from the Lock Screen, plus a **Due Today** widget that reads shared app-group history and raises its Smart Stack relevance while tasks are open.
+- **Task loop** — check tasks off in the Today view; done-state persists, feeds the widget, and shows up in the morning brief ("3 due today · 1 already done").
+- **Interactive snippet confirmation** — reminder creation from Siri/Spotlight shows a preview card and writes only after confirmation; confirmed message drafts open a real pre-filled composer.
+- **Morning brief** — an opt-in, fully local notification each morning, with read-aloud available in-app via on-device voices.
 
 ## Getting started
 
@@ -69,7 +72,7 @@ The engine details that matter:
 # Full Xcode toolchain required: plain CommandLineTools builds but silently skips XCTest.
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 
-swift test                              # 35 tests
+swift test                              # 39 tests
 swift run localassist-selftest          # 47 end-to-end checks
 swift run localassist-eval --min-score 0.9
 swift run localassist --text "Send Mira the blockers by Friday and schedule a design sync next week." --plain
@@ -88,7 +91,7 @@ Verification is deterministic and CI-gated — no LLM judges, no flaky assertion
 
 | Check | What it covers | Status |
 | --- | --- | --- |
-| `swift test` (35) | Fallback policy, error taxonomy, typed streaming order, cancellation, concurrency, due-date parsing, tool calls, executor writes, conversation memory, legacy decode, eval scorers | ✅ |
+| `swift test` (39) | Fallback policy, error taxonomy, typed streaming order, map-reduce chunking, task completion persistence, cancellation, concurrency, due-date parsing, tool calls, executor writes, conversation memory, legacy decode, eval scorers | ✅ |
 | `localassist-selftest` (47) | End-to-end scenario checks runnable on any machine | ✅ |
 | `localassist-eval` | Task recall, due-date accuracy, action mapping, structure compliance, hallucination probes over a fixed dataset; dated reports in [docs/evals](docs/evals); CI fails below 0.9 | ✅ 1.00 |
 | `localassist-bench` | p50–p99 latency, throughput, peak memory, fallback rate, cancellation timing; baselines in [docs/performance](docs/performance) | ✅ |

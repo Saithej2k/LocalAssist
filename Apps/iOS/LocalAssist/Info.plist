@@ -29,6 +29,8 @@
 	</array>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.productivity</string>
+	<key>NSCameraUsageDescription</key>
+	<string>LocalAssist scans whiteboards, receipts, and handwriting with the camera. Text extraction happens entirely on device.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>LocalAssist records voice notes only when you tap the microphone, then turns the transcript into a private local brief.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

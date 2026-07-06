@@ -5,17 +5,26 @@ public struct AssistantRun: Codable, Equatable, Sendable, Identifiable {
     public var request: AssistantRequest
     public var summary: StructuredSummary
     public var metrics: RunMetrics
+    /// IDs of task suggestions the user has checked off. Scoped per run, so
+    /// identical tasks in different captures track independently.
+    public var completedTaskIDs: Set<String>
 
     public init(
         id: String = UUID().uuidString,
         request: AssistantRequest,
         summary: StructuredSummary,
-        metrics: RunMetrics
+        metrics: RunMetrics,
+        completedTaskIDs: Set<String> = []
     ) {
         self.id = id
         self.request = request
         self.summary = summary
         self.metrics = metrics
+        self.completedTaskIDs = completedTaskIDs
+    }
+
+    public func isCompleted(_ task: TaskSuggestion) -> Bool {
+        completedTaskIDs.contains(task.id)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -23,6 +32,7 @@ public struct AssistantRun: Codable, Equatable, Sendable, Identifiable {
         case request
         case summary
         case metrics
+        case completedTaskIDs
     }
 
     public init(from decoder: Decoder) throws {
@@ -33,6 +43,7 @@ public struct AssistantRun: Codable, Equatable, Sendable, Identifiable {
         // Pre-identity history entries derive a stable id from their timestamp.
         id = try container.decodeIfPresent(String.self, forKey: .id)
             ?? "run-\(Int(metrics.startedAt.timeIntervalSince1970 * 1000))"
+        completedTaskIDs = try container.decodeIfPresent(Set<String>.self, forKey: .completedTaskIDs) ?? []
     }
 }
 

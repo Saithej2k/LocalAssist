@@ -4,6 +4,11 @@ import OSLog
 /// Orchestrates a summary run: validation, availability, typed streaming from
 /// the on-device model, normalization, and the deterministic offline fallback.
 ///
+/// Long inputs are handled with map-reduce: sentence-aligned chunks are
+/// summarized individually, then a reduce pass over the digest produces the
+/// final brief — so hour-long meeting notes work within the on-device model's
+/// context window instead of failing into the fallback.
+///
 /// Fallback policy: the deterministic summarizer substitutes whenever the
 /// model cannot complete a usable brief. Availability failures, guardrails,
 /// context-window errors, refusals, and transient generation failures all keep
@@ -14,16 +19,21 @@ public struct LocalAssistService: Sendable {
     private let normalizer: SummaryNormalizer
     private let validator: RequestValidator
 
+    /// Inputs longer than one chunk trigger map-reduce summarization.
+    private let chunkTargetCharacters: Int
+
     public init(
         model: (any StructuredModelClient)? = nil,
         fallback: DeterministicFallbackGenerator = DeterministicFallbackGenerator(),
         normalizer: SummaryNormalizer = SummaryNormalizer(),
-        validator: RequestValidator = RequestValidator()
+        validator: RequestValidator = RequestValidator(),
+        chunkTargetCharacters: Int = 2800
     ) {
         self.model = model
         self.fallback = fallback
         self.normalizer = normalizer
         self.validator = validator
+        self.chunkTargetCharacters = chunkTargetCharacters
     }
 
     /// Warms up the underlying model so the first request streams sooner.
@@ -94,16 +104,118 @@ public struct LocalAssistService: Sendable {
         }
         try Task.checkCancellation()
 
-        guard let model else {
-            return try await fallbackSummary(
-                for: validated,
-                unavailability: ModelUnavailability(reason: .adapterNotConfigured),
+        let chunks = TranscriptChunker.chunks(
+            from: validated.sourceText,
+            targetCharacters: chunkTargetCharacters
+        )
+        if chunks.count > 1 {
+            return try await mapReduceSummary(
+                validated,
+                chunks: chunks,
                 emit: emit,
                 signposter: signposter
             )
         }
 
-        emit(.init(phase: .checkingAvailability, message: "Checking Foundation Models availability"))
+        return try await singlePass(validated, emit: emit, publishUpdates: true, signposter: signposter)
+    }
+
+    // MARK: - Map-reduce for long input
+
+    private func mapReduceSummary(
+        _ request: AssistantRequest,
+        chunks: [String],
+        emit: @Sendable (SummaryGenerationUpdate) -> Void,
+        signposter: OSSignposter
+    ) async throws -> StructuredSummary {
+        let mapState = signposter.beginInterval("Map-reduce")
+        defer {
+            signposter.endInterval("Map-reduce", mapState)
+        }
+
+        var parts: [StructuredSummary] = []
+        for (index, chunk) in chunks.enumerated() {
+            try Task.checkCancellation()
+            emit(.init(
+                phase: .streamingModel,
+                message: "Summarizing section \(index + 1) of \(chunks.count)"
+            ))
+
+            let chunkRequest = AssistantRequest(
+                sourceText: chunk,
+                localeIdentifier: request.localeIdentifier,
+                maxSuggestions: request.maxSuggestions,
+                inputKind: request.inputKind
+            )
+            let part = try await singlePass(
+                chunkRequest,
+                emit: emit,
+                publishUpdates: false,
+                signposter: signposter
+            )
+            parts.append(part)
+        }
+
+        // Reduce: a model pass over the digest yields a coherent overall
+        // headline; without a working model, merge deterministically.
+        let modelProducedParts = parts.contains { $0.source == .foundationModels }
+        if modelProducedParts {
+            emit(.init(phase: .streamingModel, message: "Combining \(chunks.count) sections"))
+            let reduceRequest = AssistantRequest(
+                sourceText: TranscriptChunker.digest(of: parts),
+                localeIdentifier: request.localeIdentifier,
+                maxSuggestions: request.maxSuggestions,
+                inputKind: request.inputKind
+            )
+            return try await singlePass(
+                reduceRequest,
+                emit: emit,
+                publishUpdates: true,
+                signposter: signposter
+            )
+        }
+
+        let availability = parts.first?.diagnostics.availability
+            ?? .unavailable(ModelUnavailability(reason: .adapterNotConfigured))
+        guard let merged = normalizer.merged(
+            parts: parts,
+            request: request,
+            availability: availability
+        ) else {
+            throw GenerationFailure.decodingFailure(
+                detail: "Merging chunked summaries produced no usable brief."
+            )
+        }
+
+        emit(.init(
+            phase: .completed,
+            summary: merged,
+            message: "Combined \(chunks.count) sections offline"
+        ))
+        return merged
+    }
+
+    // MARK: - Single-pass generation
+
+    private func singlePass(
+        _ request: AssistantRequest,
+        emit: @Sendable (SummaryGenerationUpdate) -> Void,
+        publishUpdates: Bool,
+        signposter: OSSignposter
+    ) async throws -> StructuredSummary {
+        guard let model else {
+            return try await fallbackSummary(
+                for: request,
+                unavailability: ModelUnavailability(reason: .adapterNotConfigured),
+                emit: emit,
+                publishUpdates: publishUpdates,
+                signposter: signposter
+            )
+        }
+
+        if publishUpdates {
+            emit(.init(phase: .checkingAvailability, message: "Checking Foundation Models availability"))
+        }
         let availabilityState = signposter.beginInterval("Model availability")
         let availability = await model.availability()
         signposter.endInterval("Model availability", availabilityState)
@@ -113,28 +225,33 @@ public struct LocalAssistService: Sendable {
             let unavailability = availability.unavailability
                 ?? ModelUnavailability(reason: .other)
             return try await fallbackSummary(
-                for: validated,
+                for: request,
                 unavailability: unavailability,
                 emit: emit,
+                publishUpdates: publishUpdates,
                 signposter: signposter
             )
         }
 
         do {
             let responseState = signposter.beginInterval("Model response")
-            emit(.init(phase: .streamingModel, message: "Streaming on-device model response"))
+            if publishUpdates {
+                emit(.init(phase: .streamingModel, message: "Streaming on-device model response"))
+            }
 
             var latest: StructuredSummaryPartial?
-            for try await partial in model.streamSummary(for: validated) {
+            for try await partial in model.streamSummary(for: request) {
                 try Task.checkCancellation()
                 latest = partial
-                emit(.init(
-                    phase: .streamingModel,
-                    partial: partial,
-                    message: partial.isComplete
-                        ? "Model response complete"
-                        : "Streaming on-device model response"
-                ))
+                if publishUpdates {
+                    emit(.init(
+                        phase: .streamingModel,
+                        partial: partial,
+                        message: partial.isComplete
+                            ? "Model response complete"
+                            : "Streaming on-device model response"
+                    ))
+                }
             }
             signposter.endInterval("Model response", responseState)
             try Task.checkCancellation()
@@ -145,11 +262,13 @@ public struct LocalAssistService: Sendable {
                 )
             }
 
-            emit(.init(phase: .normalizing, partial: latest, message: "Normalizing structured output"))
+            if publishUpdates {
+                emit(.init(phase: .normalizing, partial: latest, message: "Normalizing structured output"))
+            }
             let normalizeState = signposter.beginInterval("Normalize summary")
             let summary = normalizer.summary(
                 from: latest,
-                request: validated,
+                request: request,
                 availability: availability
             )
             signposter.endInterval("Normalize summary", normalizeState)
@@ -160,30 +279,34 @@ public struct LocalAssistService: Sendable {
                 )
             }
 
-            emit(.init(
-                phase: .completed,
-                partial: latest,
-                summary: summary,
-                message: "Completed with Foundation Models"
-            ))
+            if publishUpdates {
+                emit(.init(
+                    phase: .completed,
+                    partial: latest,
+                    summary: summary,
+                    message: "Completed with Foundation Models"
+                ))
+            }
             return summary
         } catch is CancellationError {
             throw CancellationError()
         } catch let failure as GenerationFailure {
             if case .modelUnavailable(let unavailability) = failure {
                 return try await fallbackSummary(
-                    for: validated,
+                    for: request,
                     unavailability: unavailability,
                     emit: emit,
+                    publishUpdates: publishUpdates,
                     signposter: signposter
                 )
             }
             return try await fallbackSummary(
-                for: validated,
+                for: request,
                 availability: availability,
                 fallbackReason: String(describing: failure),
                 guidance: failure.userMessage,
                 emit: emit,
+                publishUpdates: publishUpdates,
                 signposter: signposter
             )
         } catch {
@@ -191,10 +314,13 @@ public struct LocalAssistService: Sendable {
         }
     }
 
+    // MARK: - Fallback
+
     private func fallbackSummary(
         for request: AssistantRequest,
         unavailability: ModelUnavailability,
         emit: @Sendable (SummaryGenerationUpdate) -> Void,
+        publishUpdates: Bool,
         signposter: OSSignposter
     ) async throws -> StructuredSummary {
         try await fallbackSummary(
@@ -203,6 +329,7 @@ public struct LocalAssistService: Sendable {
             fallbackReason: unavailability.detail,
             guidance: unavailability.userGuidance,
             emit: emit,
+            publishUpdates: publishUpdates,
             signposter: signposter
         )
     }
@@ -213,9 +340,12 @@ public struct LocalAssistService: Sendable {
         fallbackReason: String,
         guidance: String,
         emit: @Sendable (SummaryGenerationUpdate) -> Void,
+        publishUpdates: Bool,
         signposter: OSSignposter
     ) async throws -> StructuredSummary {
-        emit(.init(phase: .fallback, message: guidance))
+        if publishUpdates {
+            emit(.init(phase: .fallback, message: guidance))
+        }
         let fallbackState = signposter.beginInterval("Fallback generation")
         defer {
             signposter.endInterval("Fallback generation", fallbackState)
@@ -226,12 +356,14 @@ public struct LocalAssistService: Sendable {
             availability: availability,
             fallbackReason: fallbackReason
         )
-        emitFallbackPartials(for: summary, message: guidance, emit: emit)
-        emit(.init(
-            phase: .completed,
-            summary: summary,
-            message: "Completed with deterministic fallback"
-        ))
+        if publishUpdates {
+            emitFallbackPartials(for: summary, message: guidance, emit: emit)
+            emit(.init(
+                phase: .completed,
+                summary: summary,
+                message: "Completed with deterministic fallback"
+            ))
+        }
         return summary
     }
 

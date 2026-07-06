@@ -19,7 +19,7 @@ public struct ShowRecentRunsIntent: AppIntent {
     }
 
     public func perform() async throws -> some IntentResult & ReturnsValue<[AssistantRunEntity]> & ProvidesDialog {
-        guard let store = RunHistoryStore.applicationSupportOrNil(limit: 50) else {
+        guard let store = RunHistoryStore.sharedOrLocal(limit: 50) else {
             return .result(value: [], dialog: "Run history is unavailable on this device.")
         }
 

@@ -1,8 +1,8 @@
 import Foundation
 
 public actor RunHistoryStore {
-    public let fileURL: URL
-    public let limit: Int
+    public nonisolated let fileURL: URL
+    public nonisolated let limit: Int
 
     public init(fileURL: URL, limit: Int = 50) {
         self.fileURL = fileURL
@@ -31,6 +31,33 @@ public actor RunHistoryStore {
 
     public static func applicationSupportOrNil(limit: Int = 50) -> RunHistoryStore? {
         try? applicationSupport(limit: limit)
+    }
+
+    /// App-group identifier shared with the widget and share extensions.
+    public static let appGroupIdentifier = "group.com.saithej.localassist"
+
+    /// Preferred store: the app-group container so widgets and extensions can
+    /// read the same history. Falls back to Application Support when the
+    /// group container is unavailable (tests, CLI, unsigned builds), with a
+    /// one-time migration of legacy history into the shared container.
+    public static func sharedOrLocal(limit: Int = 50) -> RunHistoryStore? {
+        guard let container = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: appGroupIdentifier
+        ) else {
+            return applicationSupportOrNil(limit: limit)
+        }
+
+        let directory = container.appendingPathComponent("LocalAssist", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fileURL = directory.appendingPathComponent("run-history.json")
+
+        if !FileManager.default.fileExists(atPath: fileURL.path),
+           let legacy = applicationSupportOrNil(limit: limit),
+           FileManager.default.fileExists(atPath: legacy.fileURL.path) {
+            try? FileManager.default.copyItem(at: legacy.fileURL, to: fileURL)
+        }
+
+        return RunHistoryStore(fileURL: fileURL, limit: limit)
     }
 
     public func load() throws -> [AssistantRun] {
@@ -79,6 +106,27 @@ public actor RunHistoryStore {
             withIntermediateDirectories: true
         )
         try data.write(to: fileURL, options: [.atomic])
+    }
+
+    /// Toggles a task's done-state inside a stored run and persists it.
+    /// Returns the updated history (newest first).
+    @discardableResult
+    public func setTask(
+        _ taskID: String,
+        completed: Bool,
+        inRun runID: String
+    ) throws -> [AssistantRun] {
+        var runs = try load()
+        guard let index = runs.firstIndex(where: { $0.id == runID }) else {
+            return runs
+        }
+        if completed {
+            runs[index].completedTaskIDs.insert(taskID)
+        } else {
+            runs[index].completedTaskIDs.remove(taskID)
+        }
+        try save(runs)
+        return runs
     }
 
     public func clear() throws {

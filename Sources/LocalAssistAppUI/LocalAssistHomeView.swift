@@ -12,6 +12,11 @@ public struct LocalAssistHomeView: View {
     @StateObject private var voiceTranscriber = VoiceNoteTranscriber()
     @State private var didRunLaunchAutomation = false
     @State private var showsSettings = false
+    @State private var showsScanner = false
+    @State private var showsOnboarding = false
+    @AppStorage("localassist.hasOnboarded") private var hasOnboarded = false
+    @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
 
     public init(viewModel: LocalAssistViewModel = LocalAssistViewModel()) {
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -27,7 +32,11 @@ public struct LocalAssistHomeView: View {
                     )
 
                     // Capture comes first: pocket-to-captured in seconds.
-                    InputComposerView(viewModel: viewModel, voiceTranscriber: voiceTranscriber)
+                    InputComposerView(
+                        viewModel: viewModel,
+                        voiceTranscriber: voiceTranscriber,
+                        onScan: { showsScanner = true }
+                    )
 
                     if viewModel.isGenerating {
                         ProgressPanel(
@@ -50,7 +59,12 @@ public struct LocalAssistHomeView: View {
                         ActionReviewView(
                             actions: viewModel.preparedActions,
                             executed: viewModel.executedActions,
-                            onConfirm: { viewModel.confirmAction($0) }
+                            onConfirm: { action in
+                                viewModel.confirmAction(action)
+                                if let url = LocalAssistViewModel.draftHandoffURL(for: action) {
+                                    openURL(url)
+                                }
+                            }
                         )
                         SummaryResultView(run: run)
                         if run.summary.source == .foundationModels {
@@ -58,7 +72,13 @@ public struct LocalAssistHomeView: View {
                         }
                     }
 
-                    TodayView(currentRun: viewModel.run, history: viewModel.history)
+                    TodayView(
+                        currentRun: viewModel.run,
+                        history: viewModel.history,
+                        onToggle: { runID, task in
+                            viewModel.toggleTask(runID: runID, task: task)
+                        }
+                    )
 
                     if !viewModel.history.isEmpty {
                         RunHistoryView(runs: viewModel.history)
@@ -85,11 +105,30 @@ public struct LocalAssistHomeView: View {
                 .sheet(isPresented: $showsSettings) {
                     SettingsSheetView(viewModel: viewModel)
                 }
+                .sheet(isPresented: $showsScanner) {
+                    ScanCaptureSheet { text in
+                        guard !text.isEmpty else {
+                            return
+                        }
+                        viewModel.inputKind = .note
+                        viewModel.inputText = viewModel.inputText.isEmpty
+                            ? text
+                            : viewModel.inputText + "\n" + text
+                    }
+                }
         }
         .task {
             viewModel.prewarm()
             viewModel.loadHistory()
             runLaunchAutomationIfNeeded()
+            if !hasOnboarded, ProcessInfo.processInfo.environment["LOCALASSIST_AUTO_RUN"] != "1" {
+                showsOnboarding = true
+            }
+        }
+        .sheet(isPresented: $showsOnboarding, onDismiss: { hasOnboarded = true }) {
+            OnboardingView {
+                showsOnboarding = false
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .localAssistCaptureRequested)) { _ in
             startExternalCapture()
@@ -99,6 +138,24 @@ public struct LocalAssistHomeView: View {
                 startExternalCapture()
             }
         }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else {
+                return
+            }
+            drainSharedCaptureIfNeeded()
+            viewModel.loadHistory()
+        }
+    }
+
+    /// Picks up text captured via the share extension while the app was away.
+    private func drainSharedCaptureIfNeeded() {
+        guard let shared = PendingCaptureInbox.drain() else {
+            return
+        }
+        viewModel.inputKind = .note
+        viewModel.inputText = viewModel.inputText.isEmpty
+            ? shared
+            : viewModel.inputText + "\n" + shared
     }
 
     /// Entry from the App Shortcut or Lock Screen widget: land directly in a
@@ -107,12 +164,31 @@ public struct LocalAssistHomeView: View {
         guard !voiceTranscriber.isRecording, !viewModel.isGenerating else {
             return
         }
+        CaptureHaptics.recordStart()
         viewModel.markExternalCaptureRequested()
         Task {
             await voiceTranscriber.start()
         }
     }
+}
 
+/// Physical confirmation that recording started/stopped — trust cue for a
+/// capture tool. No-op off iOS.
+enum CaptureHaptics {
+    static func recordStart() {
+        #if os(iOS) && canImport(UIKit)
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        #endif
+    }
+
+    static func recordStop() {
+        #if os(iOS) && canImport(UIKit)
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        #endif
+    }
+}
+
+extension LocalAssistHomeView {
     private func runLaunchAutomationIfNeeded() {
         guard !didRunLaunchAutomation else {
             return
@@ -204,17 +280,26 @@ private struct ModelModePill: View {
 }
 
 private struct TodayView: View {
+    struct TodayItem: Identifiable {
+        var runID: String
+        var task: TaskSuggestion
+        var isDone: Bool
+
+        var id: String { "\(runID)-\(task.id)" }
+    }
+
     var currentRun: AssistantRun?
     var history: [AssistantRun]
+    var onToggle: (String, TaskSuggestion) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             SectionHeader(title: "Today", symbol: "sun.max.fill")
 
             HStack(spacing: 10) {
-                TodayMetric(title: "Due today", value: "\(dueToday.count)", tint: LocalAssistColors.danger)
-                TodayMetric(title: "Actions", value: "\(nextActions.count)", tint: LocalAssistColors.accent)
-                TodayMetric(title: "Captures", value: "\(history.count)", tint: LocalAssistColors.success)
+                TodayMetric(title: "Due today", value: "\(dueToday.filter { !$0.isDone }.count)", tint: LocalAssistColors.danger)
+                TodayMetric(title: "Done", value: "\(allItems.filter(\.isDone).count)", tint: LocalAssistColors.success)
+                TodayMetric(title: "Captures", value: "\(allRuns.count)", tint: LocalAssistColors.accent)
             }
 
             if nextActions.isEmpty {
@@ -224,19 +309,31 @@ private struct TodayView: View {
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
-                    ForEach(nextActions.prefix(3), id: \.id) { suggestion in
+                    ForEach(nextActions.prefix(5)) { item in
                         HStack(alignment: .top, spacing: 10) {
-                            PriorityDot(priority: suggestion.priority)
-                                .padding(.top, 5)
+                            Button {
+                                onToggle(item.runID, item.task)
+                            } label: {
+                                Image(systemName: item.isDone ? "checkmark.circle.fill" : "circle")
+                                    .font(.system(size: 20, weight: .semibold))
+                                    .foregroundStyle(item.isDone ? LocalAssistColors.success : .secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(item.isDone ? "Mark \(item.task.title) as not done" : "Mark \(item.task.title) as done")
+
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(suggestion.title)
+                                Text(item.task.title)
                                     .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                                    .strikethrough(item.isDone)
+                                    .foregroundStyle(item.isDone ? .secondary : .primary)
                                     .fixedSize(horizontal: false, vertical: true)
-                                Text(todayDetail(for: suggestion))
+                                Text(todayDetail(for: item.task))
                                     .font(.system(.caption, design: .rounded, weight: .medium))
                                     .foregroundStyle(.secondary)
                             }
                             Spacer(minLength: 0)
+                            PriorityDot(priority: item.task.priority)
+                                .padding(.top, 6)
                         }
                     }
                 }
@@ -245,26 +342,40 @@ private struct TodayView: View {
         .panel()
     }
 
-    private var allSuggestions: [TaskSuggestion] {
-        let runs = ([currentRun].compactMap { $0 } + history)
-        return runs.flatMap(\.summary.tasks)
+    /// History already contains the current run after it is recorded; only
+    /// prepend it when it has not been persisted yet.
+    private var allRuns: [AssistantRun] {
+        var runs = history
+        if let currentRun, !runs.contains(where: { $0.id == currentRun.id }) {
+            runs.insert(currentRun, at: 0)
+        }
+        return runs
     }
 
-    private var dueToday: [TaskSuggestion] {
-        allSuggestions.filter { suggestion in
-            guard let dueDate = suggestion.dueDate else {
+    private var allItems: [TodayItem] {
+        allRuns.flatMap { run in
+            run.summary.tasks.map { task in
+                TodayItem(runID: run.id, task: task, isDone: run.isCompleted(task))
+            }
+        }
+    }
+
+    private var dueToday: [TodayItem] {
+        allItems.filter { item in
+            guard let dueDate = item.task.dueDate else {
                 return false
             }
             return Calendar.current.isDateInToday(dueDate)
         }
     }
 
-    private var nextActions: [TaskSuggestion] {
+    private var nextActions: [TodayItem] {
         let todayIDs = Set(dueToday.map(\.id))
-        let prioritized = allSuggestions.filter { suggestion in
-            todayIDs.contains(suggestion.id) || suggestion.priority == .high || suggestion.action != .none
+        let prioritized = allItems.filter { item in
+            todayIDs.contains(item.id) || item.task.priority == .high || item.task.action != .none
         }
-        return Array(prioritized.prefix(6))
+        // Open tasks first, done tasks sink to the bottom of the list.
+        return Array(prioritized.sorted { !$0.isDone && $1.isDone }.prefix(6))
     }
 
     private func todayDetail(for suggestion: TaskSuggestion) -> String {
@@ -303,6 +414,7 @@ private struct TodayMetric: View {
 private struct InputComposerView: View {
     @ObservedObject var viewModel: LocalAssistViewModel
     @ObservedObject var voiceTranscriber: VoiceNoteTranscriber
+    var onScan: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -310,8 +422,10 @@ private struct InputComposerView: View {
             HStack(alignment: .center, spacing: 14) {
                 Button {
                     if voiceTranscriber.isRecording {
+                        CaptureHaptics.recordStop()
                         voiceTranscriber.stop()
                     } else {
+                        CaptureHaptics.recordStart()
                         viewModel.inputKind = .voiceNote
                         Task {
                             await voiceTranscriber.start()
@@ -340,6 +454,21 @@ private struct InputComposerView: View {
                     }
                 }
                 Spacer(minLength: 0)
+
+                #if os(iOS)
+                    Button(action: onScan) {
+                        VStack(spacing: 3) {
+                            Image(systemName: "doc.viewfinder")
+                                .font(.system(size: 19, weight: .bold))
+                            Text("Scan")
+                                .font(.system(.caption2, design: .rounded, weight: .bold))
+                        }
+                        .frame(width: 52, height: 52)
+                    }
+                    .buttonStyle(SecondaryIconButtonStyle())
+                    .disabled(viewModel.isGenerating || voiceTranscriber.isRecording)
+                    .accessibilityLabel("Scan text with the camera")
+                #endif
             }
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 78), spacing: 8)], spacing: 8) {
@@ -621,10 +750,23 @@ private struct VoiceLevelBars: View {
 
 private struct SummaryResultView: View {
     var run: AssistantRun
+    @StateObject private var speaker = BriefSpeaker()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            SectionHeader(title: "Brief", symbol: "doc.text.magnifyingglass")
+            HStack {
+                SectionHeader(title: "Brief", symbol: "doc.text.magnifyingglass")
+                Spacer()
+                Button {
+                    speaker.toggle(text: BriefSpeaker.spokenText(for: run.summary))
+                } label: {
+                    Image(systemName: speaker.isSpeaking ? "stop.circle.fill" : "speaker.wave.2.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(LocalAssistColors.accent)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(speaker.isSpeaking ? "Stop reading brief" : "Read brief aloud")
+            }
             Text(run.summary.headline)
                 .font(.system(.title3, design: .rounded, weight: .semibold))
                 .fixedSize(horizontal: false, vertical: true)
@@ -996,12 +1138,55 @@ private struct EditableActionCard: View {
 
 private struct RunHistoryView: View {
     var runs: [AssistantRun]
+    @State private var query = ""
+
+    private var filteredRuns: [AssistantRun] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else {
+            return runs
+        }
+        return runs.filter { run in
+            let haystack = (
+                [run.summary.headline]
+                    + run.summary.keyPoints
+                    + run.summary.tasks.map(\.title)
+                    + [run.request.sourceText]
+            ).joined(separator: " ").lowercased()
+            return haystack.contains(trimmed)
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             SectionHeader(title: "Recent briefs", symbol: "clock.arrow.circlepath")
 
-            ForEach(runs.prefix(5), id: \.metrics.startedAt) { run in
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search briefs and tasks", text: $query)
+                    .textFieldStyle(.plain)
+                    .font(.system(.subheadline, design: .rounded))
+                if !query.isEmpty {
+                    Button {
+                        query = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
+                }
+            }
+            .padding(10)
+            .background(LocalAssistColors.row, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            if filteredRuns.isEmpty {
+                Label("No briefs match “\(query)”.", systemImage: "magnifyingglass")
+                    .font(.system(.subheadline, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(filteredRuns.prefix(5), id: \.metrics.startedAt) { run in
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: run.request.inputKind.symbol)
                         .foregroundStyle(LocalAssistColors.accent)
@@ -1350,6 +1535,85 @@ private extension SuggestedAction {
     }
 }
 
+/// One screen, three promises. The privacy story is the product.
+private struct OnboardingView: View {
+    var onContinue: () -> Void
+
+    var body: some View {
+        VStack(spacing: 28) {
+            Spacer(minLength: 12)
+
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 54, weight: .bold))
+                .foregroundStyle(LocalAssistColors.success)
+
+            VStack(spacing: 8) {
+                Text("Nothing leaves this phone")
+                    .font(.system(.title2, design: .rounded, weight: .bold))
+                Text("LocalAssist turns what you say into a plan — with no account, no API key, and no network.")
+                    .font(.system(.subheadline, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+            }
+
+            VStack(alignment: .leading, spacing: 18) {
+                OnboardingRow(
+                    symbol: "mic.fill",
+                    title: "Capture in seconds",
+                    detail: "Speak, scan, paste, or type. On-device speech and Live Text do the transcription."
+                )
+                OnboardingRow(
+                    symbol: "brain.head.profile",
+                    title: "Summarized on device",
+                    detail: "Apple's on-device model — or an instant rules engine — turns it into a brief with tasks and due dates."
+                )
+                OnboardingRow(
+                    symbol: "checkmark.seal.fill",
+                    title: "You confirm every action",
+                    detail: "Reminders and calendar holds are only created after you review and tap confirm."
+                )
+            }
+            .padding(.horizontal, 28)
+
+            Spacer()
+
+            Button(action: onContinue) {
+                Text("Get Started")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(PrimaryButtonStyle())
+            .padding(.horizontal, 24)
+            .padding(.bottom, 20)
+        }
+        .interactiveDismissDisabled(false)
+    }
+}
+
+private struct OnboardingRow: View {
+    var symbol: String
+    var title: String
+    var detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: symbol)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(LocalAssistColors.accent)
+                .frame(width: 34, height: 34)
+                .background(LocalAssistColors.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(.headline, design: .rounded, weight: .semibold))
+                Text(detail)
+                    .font(.system(.caption, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
 private struct SettingsSheetView: View {
     @ObservedObject var viewModel: LocalAssistViewModel
     @Environment(\.dismiss) private var dismiss
@@ -1378,6 +1642,10 @@ private struct SettingsSheetView: View {
                 }
 
                 Section {
+                    ShareLink(item: viewModel.exportMarkdown()) {
+                        Label("Export history (Markdown)", systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(viewModel.history.isEmpty)
                     Button {
                         viewModel.clearDraft()
                         dismiss()

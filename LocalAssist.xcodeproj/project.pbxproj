@@ -10,8 +10,11 @@
 		24D3489A13F3042166EA419B /* LocalAssistWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E5F9BBCA987616D5B771010B /* LocalAssistWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		39F3E037752E8918CD7F4260 /* LocalAssistAppUI in Frameworks */ = {isa = PBXBuildFile; productRef = F56DF276EC9529872816ED1D /* LocalAssistAppUI */; };
 		41C734909577BF5037DCEE47 /* LocalAssistWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 530C6110899A20B711F3DE30 /* LocalAssistWidgets.swift */; };
+		78BAF314095D16FE34C8A8A8 /* LocalAssistCore in Frameworks */ = {isa = PBXBuildFile; productRef = 42108E34E8F0B7008BE7CA0A /* LocalAssistCore */; };
+		8183F678E9F05A19A3A2D578 /* LocalAssistShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 100D19FDD93D7A4B36352C36 /* LocalAssistShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		BFC076489D64683D42671182 /* LocalAssistAppIntents in Frameworks */ = {isa = PBXBuildFile; productRef = 1D86B0D8943AC4A670A007A5 /* LocalAssistAppIntents */; };
 		D7803D24F14846782D1A0EBE /* LocalAssistCore in Frameworks */ = {isa = PBXBuildFile; productRef = D051C16E3E17EEED90957D50 /* LocalAssistCore */; };
+		DB4AE5303ECDAD349BF68A17 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D59F165A177F3C9014ED8AF4 /* ShareViewController.swift */; };
 		DF1BD8CA7BEEEEB342DD358D /* LocalAssistApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB96F71AF087606A91C81EB1 /* LocalAssistApp.swift */; };
 		E1752C1D449EF56BF1CCB7E2 /* LocalAssistFoundationModels in Frameworks */ = {isa = PBXBuildFile; productRef = 7C777688435504B873D7A4D0 /* LocalAssistFoundationModels */; };
 		F893FB45E2C69FC213781AF5 /* LocalAssistSystemTools in Frameworks */ = {isa = PBXBuildFile; productRef = 1153334359FBB43B0BF5C260 /* LocalAssistSystemTools */; };
@@ -25,6 +28,13 @@
 			remoteGlobalIDString = 92C0B1C1721189CDD23D6339;
 			remoteInfo = LocalAssistWidgets;
 		};
+		321D25A85F529D1C68BEAD79 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7E7F5AFDDAA9527B9AD3238A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 46535ADC5064B242309196D6;
+			remoteInfo = LocalAssistShare;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -35,6 +45,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				24D3489A13F3042166EA419B /* LocalAssistWidgets.appex in Embed Foundation Extensions */,
+				8183F678E9F05A19A3A2D578 /* LocalAssistShare.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -42,16 +53,30 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		100D19FDD93D7A4B36352C36 /* LocalAssistShare.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = LocalAssistShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		530C6110899A20B711F3DE30 /* LocalAssistWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalAssistWidgets.swift; sourceTree = "<group>"; };
 		53DCCBE20696642DA66BD5DF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5ED7E8C53374413AB4397426 /* LocalAssist.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = LocalAssist.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8C836322D2AF4B6293385B30 /* LocalAssistWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LocalAssistWidgets.entitlements; sourceTree = "<group>"; };
 		C5C84973C77D20E0EE140564 /* build-this-end-to-end-and */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "build-this-end-to-end-and"; path = .; sourceTree = SOURCE_ROOT; };
+		D59F165A177F3C9014ED8AF4 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		DB96F71AF087606A91C81EB1 /* LocalAssistApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalAssistApp.swift; sourceTree = "<group>"; };
 		E5F9BBCA987616D5B771010B /* LocalAssistWidgets.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = LocalAssistWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		E6E2493513D610B7937688D1 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		EBAD0D28D28E9A2E28B29154 /* LocalAssist.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LocalAssist.entitlements; sourceTree = "<group>"; };
 		EDC2D2D1366B5719213002B4 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		F062C0DB8E14F1906F49ED3E /* LocalAssistShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LocalAssistShare.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		916042BB45E751C60C605AB8 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				78BAF314095D16FE34C8A8A8 /* LocalAssistCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C444FFF63FA58CF2F0FA250D /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -71,6 +96,7 @@
 			isa = PBXGroup;
 			children = (
 				CA733D0BC63BE407D0131627 /* LocalAssist */,
+				AD024810D1B9C134AD04A3AA /* LocalAssistShare */,
 				CAA1FEB2B7B4829D2B388DBF /* LocalAssistWidgets */,
 				957BE41A39892D25162FD8C4 /* Packages */,
 				9B5D117BD0180B4CC40A1AD5 /* Products */,
@@ -89,15 +115,28 @@
 			isa = PBXGroup;
 			children = (
 				5ED7E8C53374413AB4397426 /* LocalAssist.app */,
+				100D19FDD93D7A4B36352C36 /* LocalAssistShare.appex */,
 				E5F9BBCA987616D5B771010B /* LocalAssistWidgets.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		AD024810D1B9C134AD04A3AA /* LocalAssistShare */ = {
+			isa = PBXGroup;
+			children = (
+				E6E2493513D610B7937688D1 /* Info.plist */,
+				F062C0DB8E14F1906F49ED3E /* LocalAssistShare.entitlements */,
+				D59F165A177F3C9014ED8AF4 /* ShareViewController.swift */,
+			);
+			name = LocalAssistShare;
+			path = Apps/iOS/LocalAssistShare;
 			sourceTree = "<group>";
 		};
 		CA733D0BC63BE407D0131627 /* LocalAssist */ = {
 			isa = PBXGroup;
 			children = (
 				EDC2D2D1366B5719213002B4 /* Info.plist */,
+				EBAD0D28D28E9A2E28B29154 /* LocalAssist.entitlements */,
 				DB96F71AF087606A91C81EB1 /* LocalAssistApp.swift */,
 			);
 			name = LocalAssist;
@@ -108,6 +147,7 @@
 			isa = PBXGroup;
 			children = (
 				53DCCBE20696642DA66BD5DF /* Info.plist */,
+				8C836322D2AF4B6293385B30 /* LocalAssistWidgets.entitlements */,
 				530C6110899A20B711F3DE30 /* LocalAssistWidgets.swift */,
 			);
 			name = LocalAssistWidgets;
@@ -129,6 +169,7 @@
 			);
 			dependencies = (
 				451497377E1D556938DB3195 /* PBXTargetDependency */,
+				75B7472A74A0AE067DEDB00D /* PBXTargetDependency */,
 			);
 			name = LocalAssist;
 			packageProductDependencies = (
@@ -142,11 +183,29 @@
 			productReference = 5ED7E8C53374413AB4397426 /* LocalAssist.app */;
 			productType = "com.apple.product-type.application";
 		};
+		46535ADC5064B242309196D6 /* LocalAssistShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D3EBD0FD06F14118B05E446D /* Build configuration list for PBXNativeTarget "LocalAssistShare" */;
+			buildPhases = (
+				6818CF444AFEC74C1DD81AA4 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LocalAssistShare;
+			packageProductDependencies = (
+			);
+			productName = LocalAssistShare;
+			productReference = 100D19FDD93D7A4B36352C36 /* LocalAssistShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		92C0B1C1721189CDD23D6339 /* LocalAssistWidgets */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 234CAC3C6551AB64C40C3D4A /* Build configuration list for PBXNativeTarget "LocalAssistWidgets" */;
 			buildPhases = (
 				CB911FF56BCA668E0E1F3119 /* Sources */,
+				916042BB45E751C60C605AB8 /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -154,6 +213,7 @@
 			);
 			name = LocalAssistWidgets;
 			packageProductDependencies = (
+				42108E34E8F0B7008BE7CA0A /* LocalAssistCore */,
 			);
 			productName = LocalAssistWidgets;
 			productReference = E5F9BBCA987616D5B771010B /* LocalAssistWidgets.appex */;
@@ -169,6 +229,9 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					04B48E43F6357ECAC0022B36 = {
+						ProvisioningStyle = Automatic;
+					};
+					46535ADC5064B242309196D6 = {
 						ProvisioningStyle = Automatic;
 					};
 					92C0B1C1721189CDD23D6339 = {
@@ -194,6 +257,7 @@
 			projectRoot = "";
 			targets = (
 				04B48E43F6357ECAC0022B36 /* LocalAssist */,
+				46535ADC5064B242309196D6 /* LocalAssistShare */,
 				92C0B1C1721189CDD23D6339 /* LocalAssistWidgets */,
 			);
 		};
@@ -205,6 +269,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				DF1BD8CA7BEEEEB342DD358D /* LocalAssistApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6818CF444AFEC74C1DD81AA4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DB4AE5303ECDAD349BF68A17 /* ShareViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -224,12 +296,40 @@
 			target = 92C0B1C1721189CDD23D6339 /* LocalAssistWidgets */;
 			targetProxy = 116FE9C845008AECFC9D23F2 /* PBXContainerItemProxy */;
 		};
+		75B7472A74A0AE067DEDB00D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 46535ADC5064B242309196D6 /* LocalAssistShare */;
+			targetProxy = 321D25A85F529D1C68BEAD79 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		15575E651A350F584B7E8D2C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Apps/iOS/LocalAssistShare/LocalAssistShare.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Apps/iOS/LocalAssistShare/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.saithej.localassist.share;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 		2336C46AEA425A9FBE7F38B5 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Apps/iOS/LocalAssistWidgets/LocalAssistWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -252,6 +352,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Apps/iOS/LocalAssist/LocalAssist.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -332,10 +433,33 @@
 			};
 			name = Debug;
 		};
+		7F3B753B07D0284E6BB9AFF1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Apps/iOS/LocalAssistShare/LocalAssistShare.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Apps/iOS/LocalAssistShare/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.saithej.localassist.share;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		9701A8768E81C2AC56735265 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Apps/iOS/LocalAssist/LocalAssist.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -412,6 +536,7 @@
 		F9819EDD06B76A9692F24CF5 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Apps/iOS/LocalAssistWidgets/LocalAssistWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -451,6 +576,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
+		D3EBD0FD06F14118B05E446D /* Build configuration list for PBXNativeTarget "LocalAssistShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				15575E651A350F584B7E8D2C /* Debug */,
+				7F3B753B07D0284E6BB9AFF1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		E2AD60AFCD600B633228D178 /* Build configuration list for PBXProject "LocalAssist" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -477,6 +611,10 @@
 		1D86B0D8943AC4A670A007A5 /* LocalAssistAppIntents */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = LocalAssistAppIntents;
+		};
+		42108E34E8F0B7008BE7CA0A /* LocalAssistCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LocalAssistCore;
 		};
 		7C777688435504B873D7A4D0 /* LocalAssistFoundationModels */ = {
 			isa = XCSwiftPackageProductDependency;

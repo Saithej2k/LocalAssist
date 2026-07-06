@@ -34,12 +34,15 @@ targets:
         product: LocalAssistCore
       - target: LocalAssistWidgets
         embed: true
+      - target: LocalAssistShare
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.saithej.localassist
         INFOPLIST_FILE: Apps/iOS/LocalAssist/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: Apps/iOS/LocalAssist/LocalAssist.entitlements
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
 
@@ -49,12 +52,33 @@ targets:
     deploymentTarget: "26.0"
     sources:
       - path: Apps/iOS/LocalAssistWidgets
+    dependencies:
+      - package: LocalAssistPackage
+        product: LocalAssistCore
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.saithej.localassist.widgets
         INFOPLIST_FILE: Apps/iOS/LocalAssistWidgets/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: Apps/iOS/LocalAssistWidgets/LocalAssistWidgets.entitlements
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SKIP_INSTALL: YES
+
+  LocalAssistShare:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: Apps/iOS/LocalAssistShare
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.saithej.localassist.share
+        INFOPLIST_FILE: Apps/iOS/LocalAssistShare/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: Apps/iOS/LocalAssistShare/LocalAssistShare.entitlements
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
         SKIP_INSTALL: YES

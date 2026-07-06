@@ -610,6 +610,75 @@ final class LocalAssistCoreTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(report.meanComposite, 0.75, report.renderedMarkdown())
     }
 
+    // MARK: - Chunking & completion
+
+    func testTranscriptChunkerSplitsOnSentenceBoundaries() {
+        let text = Array(repeating: "Review the launch checklist before Friday.", count: 12)
+            .joined(separator: " ")
+        let chunks = TranscriptChunker.chunks(from: text, targetCharacters: 120)
+
+        XCTAssertGreaterThan(chunks.count, 1)
+        XCTAssertTrue(chunks.allSatisfy { $0.count <= 130 })
+        XCTAssertTrue(chunks.allSatisfy { $0.hasSuffix(".") })
+    }
+
+    func testLongInputUsesMapReduceWithModel() async throws {
+        let service = LocalAssistService(
+            model: StaticStructuredModelClient.completing(with: .mira),
+            chunkTargetCharacters: 80
+        )
+        let longText = Array(repeating: "Send Mira the blockers by Friday.", count: 10)
+            .joined(separator: " ")
+
+        var sectionMessages = 0
+        var summary: StructuredSummary?
+        for try await update in service.streamSummary(AssistantRequest(sourceText: longText)) {
+            if update.message?.contains("Summarizing section") == true {
+                sectionMessages += 1
+            }
+            if let final = update.summary {
+                summary = final
+            }
+        }
+
+        XCTAssertGreaterThan(sectionMessages, 1, "expected per-section progress messages")
+        XCTAssertEqual(summary?.source, .foundationModels)
+    }
+
+    func testLongInputMergesDeterministicallyWithoutModel() async throws {
+        let service = LocalAssistService(chunkTargetCharacters: 80)
+        let longText = Array(repeating: "Review the launch checklist and send blockers by Friday.", count: 8)
+            .joined(separator: " ")
+
+        let summary = try await service.summarize(AssistantRequest(sourceText: longText))
+
+        XCTAssertEqual(summary.source, .deterministicFallback)
+        XCTAssertTrue(summary.headline.contains("more sections"), summary.headline)
+        XCTAssertFalse(summary.tasks.isEmpty)
+    }
+
+    func testTaskCompletionPersistsThroughHistoryStore() async throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalAssist-\(UUID().uuidString)")
+            .appendingPathComponent("history.json")
+        let store = RunHistoryStore(fileURL: url, limit: 5)
+
+        let run = sampleRun(index: 1, latency: 1)
+        let taskID = run.summary.tasks[0].id
+        try await store.append(run)
+
+        var runs = try await store.setTask(taskID, completed: true, inRun: run.id)
+        XCTAssertTrue(runs.first?.isCompleted(run.summary.tasks[0]) == true)
+
+        // Survives reload from disk.
+        runs = try await store.load()
+        XCTAssertTrue(runs.first?.completedTaskIDs.contains(taskID) == true)
+
+        runs = try await store.setTask(taskID, completed: false, inRun: run.id)
+        XCTAssertFalse(runs.first?.isCompleted(run.summary.tasks[0]) == true)
+        try await store.clear()
+    }
+
     // MARK: - Morning brief
 
     func testMorningBriefBodyReflectsDueAndCapturedCounts() async throws {

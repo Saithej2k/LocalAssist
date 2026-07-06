@@ -30,9 +30,12 @@ public struct LocalAssistSummaryIntent: AppIntent {
         )
 
         // Persist so the entity is queryable later and shows up in history.
-        if let store = RunHistoryStore.applicationSupportOrNil() {
+        if let store = RunHistoryStore.sharedOrLocal() {
             _ = try? await store.append(run)
         }
+        #if canImport(CoreSpotlight)
+            await LocalAssistSpotlight.donateAll()
+        #endif
 
         let entity = AssistantRunEntity(run: run)
         return .result(

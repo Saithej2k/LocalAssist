@@ -51,6 +51,37 @@ public struct AssistantRunEntity: AppEntity, Identifiable, Sendable {
     }
 }
 
+#if canImport(CoreSpotlight)
+    import CoreSpotlight
+
+    /// Briefs surface in Spotlight search today, and this is the exact
+    /// integration Apple named for Siri personal context — third-party
+    /// content joins via the Spotlight index.
+    extension AssistantRunEntity: IndexedEntity {
+        public var attributeSet: CSSearchableItemAttributeSet {
+            let attributes = CSSearchableItemAttributeSet(contentType: .text)
+            attributes.title = overview
+            attributes.contentDescription = plainText
+            attributes.keywords = taskTitles + ["LocalAssist", "brief", "tasks"]
+            return attributes
+        }
+    }
+
+    public enum LocalAssistSpotlight {
+        /// Re-donates all saved briefs. Cheap (history is capped) and safe to
+        /// call on every launch and after every new capture.
+        public static func donateAll() async {
+            guard let store = RunHistoryStore.sharedOrLocal(),
+                  let runs = try? await store.load()
+            else {
+                return
+            }
+            let entities = runs.map(AssistantRunEntity.init(run:))
+            try? await CSSearchableIndex.default().indexAppEntities(entities)
+        }
+    }
+#endif
+
 public struct AssistantRunQuery: EntityQuery, Sendable {
     public init() {}
 
@@ -67,7 +98,7 @@ public struct AssistantRunQuery: EntityQuery, Sendable {
     }
 
     private func loadRuns() async throws -> [AssistantRun] {
-        guard let store = RunHistoryStore.applicationSupportOrNil() else {
+        guard let store = RunHistoryStore.sharedOrLocal() else {
             return []
         }
         return try await store.load()
