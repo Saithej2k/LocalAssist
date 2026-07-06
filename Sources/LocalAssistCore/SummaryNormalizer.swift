@@ -58,16 +58,16 @@ public struct SummaryNormalizer: Sendable {
             .cleanedBullet()
             .withoutSchemaPlaceholder
             .nilIfEmpty
-        let parsedDueDate = partial.dueDate ?? dueHint.flatMap(Self.isoDate)
+        let parsedDueDate = partial.dueDate ?? dueHint.flatMap { LocalAssistDates.parse($0) }
         let dueDate = parsedDueDate.flatMap {
             Self.isStale($0, relativeTo: generatedAt) ? nil : $0
         }
-        let displayDueHint = dueDate == nil && dueHint.flatMap(Self.isoDate) != nil ? nil : dueHint
+        let displayDueHint = dueDate == nil && dueHint.flatMap({ LocalAssistDates.parse($0) }) != nil ? nil : dueHint
         let rationale = (partial.rationale ?? "").cleanedBullet()
         let action = partial.action ?? Self.inferAction(from: title)
 
         return TaskSuggestion(
-            id: StableID.make(from: title + (displayDueHint ?? "") + (dueDate.map { ISO8601DateFormatter().string(from: $0) } ?? "")),
+            id: StableID.make(from: title + (displayDueHint ?? "") + (dueDate.map { LocalAssistDates.dateOnlyString(from: $0) } ?? "")),
             title: title,
             priority: partial.priority ?? .medium,
             dueHint: displayDueHint,
@@ -76,17 +76,6 @@ public struct SummaryNormalizer: Sendable {
             rationale: rationale.isEmpty ? "Suggested by the on-device model." : rationale,
             confidence: min(max(partial.confidence ?? 0.72, 0), 1)
         )
-    }
-
-    private static func isoDate(_ value: String) -> Date? {
-        let iso = ISO8601DateFormatter()
-        if let date = iso.date(from: value) {
-            return date
-        }
-
-        let dateOnly = ISO8601DateFormatter()
-        dateOnly.formatOptions = [.withFullDate]
-        return dateOnly.date(from: value)
     }
 
     private static func isStale(_ date: Date, relativeTo generatedAt: Date) -> Bool {

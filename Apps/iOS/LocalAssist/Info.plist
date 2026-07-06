@@ -39,6 +39,8 @@
 	<string>LocalAssist creates reminders you explicitly confirm from your summarized notes. Nothing is written without your confirmation.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>LocalAssist checks your free time to ground scheduling suggestions and creates calendar holds you explicitly confirm.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>LocalAssist matches names in your notes to your contacts so drafts reference real people. Lookups happen entirely on device.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

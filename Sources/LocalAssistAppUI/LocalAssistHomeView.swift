@@ -688,98 +688,6 @@ private struct CompactVoiceStatusView: View {
     }
 }
 
-private struct VoiceCaptureView: View {
-    @ObservedObject var transcriber: VoiceNoteTranscriber
-    var isGenerating: Bool
-    var onTranscriptChanged: (String) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 14) {
-                Button {
-                    if transcriber.isRecording {
-                        transcriber.stop()
-                    } else {
-                        Task {
-                            await transcriber.start()
-                        }
-                    }
-                } label: {
-                    Image(systemName: transcriber.isRecording ? "stop.fill" : "mic.fill")
-                        .font(.system(size: 26, weight: .bold))
-                        .frame(width: 74, height: 74)
-                }
-                .buttonStyle(VoiceButtonStyle(isRecording: transcriber.isRecording))
-                .disabled(isGenerating || transcriber.state == .requestingPermission)
-                .accessibilityLabel(transcriber.isRecording ? "Stop voice note" : "Record voice note")
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(voiceStatusTitle)
-                        .font(.system(.headline, design: .rounded, weight: .bold))
-                    Text(voiceStatusDetail)
-                        .font(.system(.subheadline, design: .rounded))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if transcriber.isRecording {
-                        VoiceLevelBars()
-                    }
-                }
-
-                Spacer(minLength: 0)
-            }
-
-            if let message = transcriber.errorMessage {
-                Label(message, systemImage: "exclamationmark.triangle.fill")
-                    .font(.system(.caption, design: .rounded, weight: .medium))
-                    .foregroundStyle(LocalAssistColors.warning)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if !transcriber.transcript.isEmpty {
-                Text(transcriber.transcript)
-                    .font(.system(.caption, design: .rounded, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(LocalAssistColors.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            }
-        }
-        .padding(14)
-        .background(LocalAssistColors.row, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .onChange(of: transcriber.transcript) { _, newValue in
-            guard !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return
-            }
-            onTranscriptChanged(newValue)
-        }
-    }
-
-    private var voiceStatusTitle: String {
-        switch transcriber.state {
-        case .idle:
-            "Voice note"
-        case .requestingPermission:
-            "Requesting access"
-        case .recording:
-            "Listening"
-        case .unavailable:
-            "Voice unavailable"
-        }
-    }
-
-    private var voiceStatusDetail: String {
-        switch transcriber.state {
-        case .idle:
-            "Tap the mic, speak naturally, then review the transcript before creating a brief."
-        case .requestingPermission:
-            "Waiting for microphone and speech recognition access."
-        case .recording:
-            "Speak your thought, meeting recap, or task list."
-        case .unavailable:
-            "You can still type or paste the transcript."
-        }
-    }
-}
-
 private struct VoiceLevelBars: View {
     private let heights: [CGFloat] = [8, 16, 24, 14, 20]
 
@@ -1233,7 +1141,7 @@ private struct RunHistoryView: View {
                     .foregroundStyle(.secondary)
             }
 
-            ForEach(filteredRuns.prefix(5), id: \.metrics.startedAt) { run in
+            ForEach(filteredRuns.prefix(5), id: \.id) { run in
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: run.request.inputKind.symbol)
                         .foregroundStyle(LocalAssistColors.accent)
@@ -1334,20 +1242,24 @@ private struct ProgressPanel: View {
                         Text(headline)
                             .font(.system(.subheadline, design: .rounded, weight: .semibold))
                             .fixedSize(horizontal: false, vertical: true)
+                            .contentTransition(.opacity)
                     }
                     ForEach(partial.keyPoints, id: \.self) { point in
                         Label(point, systemImage: "circle.dotted")
                             .font(.system(.caption, design: .rounded))
                             .foregroundStyle(.secondary)
+                            .transition(.opacity)
                     }
                     ForEach(Array(partial.suggestions.enumerated()), id: \.offset) { _, suggestion in
                         if let title = suggestion.title, !title.isEmpty {
                             Label {
                                 Text("\(title)\(dueText(for: suggestion))")
+                                    .contentTransition(.opacity)
                             } icon: {
                                 Image(systemName: "arrow.right.circle")
                             }
                             .font(.system(.caption, design: .rounded, weight: .medium))
+                            .transition(.opacity)
                         }
                     }
                 }
@@ -1357,6 +1269,9 @@ private struct ProgressPanel: View {
             }
         }
         .panel()
+        // Streamed fields fade in as snapshots arrive instead of popping —
+        // the WWDC "Code-Along" animation + content-transition recipe.
+        .animation(.easeOut(duration: 0.25), value: partial)
     }
 
     private var phaseTitle: String {
@@ -1380,7 +1295,7 @@ private struct ProgressPanel: View {
 
     private func dueText(for suggestion: TaskSuggestionPartial) -> String {
         if let dueDate = suggestion.dueDate {
-            return " · \(ISO8601DateFormatter().string(from: dueDate))"
+            return " · \(LocalAssistDates.dateOnlyString(from: dueDate))"
         }
         if let dueHint = suggestion.dueHint {
             return " · \(dueHint)"

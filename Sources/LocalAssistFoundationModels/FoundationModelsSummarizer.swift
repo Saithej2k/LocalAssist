@@ -11,8 +11,10 @@ import OSLog
 /// - **Guided generation**: `streamResponse(generating: DailyBrief.self)`
 ///   uses constrained decoding — schema conformance is guaranteed, so there is
 ///   no malformed-output repair path.
-/// - **Schema token savings**: after the first turn in a session the schema is
-///   already in the transcript, so `includeSchemaInPrompt` is dropped.
+/// - **Schema token savings**: the session instructions carry a full
+///   `DailyBrief` example (optional due date shown populated and nil), so the
+///   schema is omitted from every prompt — the WWDC "example instead of
+///   schema" optimization, applied to the first turn as well as repeats.
 /// - **Context-window management**: compressed exchanges are recorded in
 ///   `ConversationMemory`; on (projected or actual) transcript overflow the
 ///   session is rebuilt with a condensed digest and the request is retried once.
@@ -125,11 +127,12 @@ public actor FoundationModelsSummarizer: StructuredModelClient {
         do {
             try Task.checkCancellation()
 
-            let includeSchema = !usesSharedSession || completedTurnsInSession == 0
+            // The instructions example stands in for the schema on every
+            // turn, including the first — see `DailyBrief.instructionsExample`.
             let stream = session.streamResponse(
                 to: prompt,
                 generating: DailyBrief.self,
-                includeSchemaInPrompt: includeSchema,
+                includeSchemaInPrompt: false,
                 options: GenerationOptions()
             )
 
@@ -193,14 +196,17 @@ public actor FoundationModelsSummarizer: StructuredModelClient {
     }
 
     private func rebuildSessionWithCondensedContext() {
-        session = makeSession(condensedContext: memory.condensedContext())
+        let condensed = memory.condensedContext()
+        session = makeSession(condensedContext: condensed)
         completedTurnsInSession = 0
-        estimatedTranscriptCharacters = memory.condensedContext()?.count ?? 0
+        estimatedTranscriptCharacters = condensed?.count ?? 0
     }
 
     private func makeSession(condensedContext: String?) -> LanguageModelSession {
         LanguageModelSession(model: model, tools: tools) {
             Self.baseInstructions
+            "Respond in exactly this format. Match the example's level of detail, and leave a task's due date out when the note names none:"
+            DailyBrief.instructionsExample
             if let condensedContext {
                 condensedContext
             }

@@ -197,23 +197,36 @@ public struct SystemActionExecutor: ToolActionExecuting {
 
 public enum LocalAssistToolkit {
     /// The default tool set the model can call during generation, wired to
-    /// the user's real calendar. Calendar access is requested on the first
-    /// tool call, and a denied/failed lookup surfaces as a tool failure that
-    /// the service handles — generation never crashes on permissions.
+    /// the user's real calendar and contacts. System access is requested on
+    /// the first tool call, and a denied/failed lookup surfaces as a tool
+    /// failure that the service handles — generation never crashes on
+    /// permissions.
     public static func liveTools(counter: ToolInvocationCounter? = nil) -> [any FoundationModels.Tool] {
+        var tools: [any FoundationModels.Tool] = []
         #if canImport(EventKit)
-            [CalendarAvailabilityTool(provider: EventKitFreeBusyProvider(), counter: counter)]
-        #else
-            sampleTools(counter: counter)
+            tools.append(CalendarAvailabilityTool(provider: EventKitFreeBusyProvider(), counter: counter))
         #endif
+        #if canImport(Contacts)
+            tools.append(ContactsLookupTool(resolver: ContactsFrameworkResolver(), counter: counter))
+        #endif
+        return tools.isEmpty ? sampleTools(counter: counter) : tools
     }
 
-    /// Seeded in-memory agenda for previews, screenshots, and platforms
-    /// without EventKit.
+    /// Seeded in-memory agenda and contacts for previews, screenshots, and
+    /// platforms without EventKit.
     public static func sampleTools(
         counter: ToolInvocationCounter? = nil,
         agendaStore: SampleAgendaStore = .seeded()
     ) -> [any FoundationModels.Tool] {
-        [CalendarAvailabilityTool(provider: agendaStore, counter: counter)]
+        [
+            CalendarAvailabilityTool(provider: agendaStore, counter: counter),
+            ContactsLookupTool(
+                resolver: StaticContactResolver(contacts: [
+                    ResolvedContact(displayName: "Mira Chen", hasEmail: true, hasPhone: true),
+                    ResolvedContact(displayName: "Priya Patel", hasEmail: true, hasPhone: false),
+                ]),
+                counter: counter
+            ),
+        ]
     }
 }

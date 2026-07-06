@@ -136,7 +136,7 @@ public struct DeterministicFallbackGenerator: Sendable {
             var dueHint = TaskClassifier.dueHint(in: clause)
             let dueDate = dateParser.date(from: dueHint ?? clause, relativeTo: referenceDate)
             if dueHint == nil, let dueDate {
-                dueHint = Self.isoDate(dueDate)
+                dueHint = LocalAssistDates.dateOnlyString(from: dueDate, timeZone: calendar.timeZone)
             }
             let priority = TaskClassifier.priority(in: clause, dueHint: dueHint)
             let action = TaskClassifier.action(for: clause)
@@ -160,12 +160,6 @@ public struct DeterministicFallbackGenerator: Sendable {
         }
 
         return suggestions
-    }
-
-    private static func isoDate(_ date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        return formatter.string(from: date)
     }
 }
 

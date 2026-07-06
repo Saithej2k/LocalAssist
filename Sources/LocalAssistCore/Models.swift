@@ -247,7 +247,7 @@ public struct TaskSuggestion: Codable, Equatable, Sendable {
         priority = try container.decode(TaskPriority.self, forKey: .priority)
         dueHint = try container.decodeIfPresent(String.self, forKey: .dueHint)
         if let dueDateString = try container.decodeIfPresent(String.self, forKey: .dueDate) {
-            dueDate = Self.parseISODate(dueDateString)
+            dueDate = LocalAssistDates.parse(dueDateString)
         } else {
             dueDate = nil
         }
@@ -268,15 +268,6 @@ public struct TaskSuggestion: Codable, Equatable, Sendable {
         try container.encode(confidence, forKey: .confidence)
     }
 
-    private static func parseISODate(_ value: String) -> Date? {
-        let full = ISO8601DateFormatter()
-        if let date = full.date(from: value) {
-            return date
-        }
-        let day = ISO8601DateFormatter()
-        day.formatOptions = [.withFullDate]
-        return day.date(from: value)
-    }
 }
 
 public struct GenerationDiagnostics: Codable, Equatable, Sendable {
@@ -390,10 +381,6 @@ public extension StructuredSummary {
 
 public extension TaskSuggestion {
     var iso8601DueDate: String? {
-        dueDate.map {
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withFullDate]
-            return formatter.string(from: $0)
-        }
+        dueDate.map { LocalAssistDates.dateOnlyString(from: $0) }
     }
 }

@@ -68,7 +68,7 @@ public struct StructuredSummaryPartial: Equatable, Sendable {
             if let dueHint = suggestion.dueHint, !dueHint.isEmpty {
                 line += " (\(dueHint))"
             } else if let dueDate = suggestion.dueDate {
-                line += " (\(ISO8601DateFormatter().string(from: dueDate)))"
+                line += " (\(LocalAssistDates.dateOnlyString(from: dueDate)))"
             }
             lines.append(line)
         }

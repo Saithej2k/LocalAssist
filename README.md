@@ -50,9 +50,9 @@ The engine details that matter:
 | --- | --- |
 | Guided generation | `@Generable`/`@Guide` `DailyBrief` contract with `streamResponse(generating:)` — the framework's constrained decoding guarantees schema conformance, so there is no JSON-repair path anywhere in the app |
 | Typed streaming | `PartiallyGenerated` snapshots map to typed partials; the headline renders within the first tokens while tasks are still generating |
-| Session lifecycle | One `LanguageModelSession` reused across turns, prewarmed on demand, schema dropped from repeat prompts, overlapping requests isolated |
+| Session lifecycle | One `LanguageModelSession` reused across turns, prewarmed on demand, schema replaced by a full in-instructions example (`includeSchemaInPrompt: false` on every turn), overlapping requests isolated |
 | Context management | Rolling-window transcript compression (`ConversationMemory`); on projected or actual overflow the session is rebuilt with a condensed digest and retried |
-| Tool calling | `CalendarAvailabilityTool` (Foundation Models `Tool` protocol) reads real free/busy from EventKit so scheduling suggestions land in open slots |
+| Tool calling | `CalendarAvailabilityTool` reads real free/busy from EventKit so scheduling suggestions land in open slots; `ContactsLookupTool` resolves first names in notes to real contacts (both Foundation Models `Tool`s) |
 | Error taxonomy | Every `GenerationError` and `UnavailableReason` maps to a typed `GenerationFailure`; the deterministic fallback keeps every capture producing a brief, with the exact reason preserved in diagnostics |
 | Due dates | The model resolves relative deadlines to ISO-8601 dates; a deterministic parser handles the rules path and confirmed writes |
 
@@ -72,7 +72,7 @@ The engine details that matter:
 # Full Xcode toolchain required: plain CommandLineTools builds but silently skips XCTest.
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 
-swift test                              # 39 tests
+swift test                              # 41 tests
 swift run localassist-selftest          # 47 end-to-end checks
 swift run localassist-eval --min-score 0.9
 swift run localassist --text "Send Mira the blockers by Friday and schedule a design sync next week." --plain
@@ -91,7 +91,7 @@ Verification is deterministic and CI-gated — no LLM judges, no flaky assertion
 
 | Check | What it covers | Status |
 | --- | --- | --- |
-| `swift test` (39) | Fallback policy, error taxonomy, typed streaming order, map-reduce chunking, task completion persistence, cancellation, concurrency, due-date parsing, tool calls, executor writes, conversation memory, legacy decode, eval scorers | ✅ |
+| `swift test` (41) | Fallback policy, error taxonomy, typed streaming order, map-reduce chunking, task completion persistence, cancellation, concurrency, due-date parsing, local-day due-date policy, tool calls, executor writes, conversation memory, legacy decode, eval scorers | ✅ |
 | `localassist-selftest` (47) | End-to-end scenario checks runnable on any machine | ✅ |
 | `localassist-eval` | Task recall, due-date accuracy, action mapping, structure compliance, hallucination probes over a fixed dataset; dated reports in [docs/evals](docs/evals); CI fails below 0.9 | ✅ 1.00 |
 | `localassist-bench` | p50–p99 latency, throughput, peak memory, fallback rate, cancellation timing; baselines in [docs/performance](docs/performance) | ✅ |

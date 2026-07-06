@@ -70,21 +70,11 @@ extension BriefTaskSuggestion.PartiallyGenerated {
             title: title,
             priority: priority?.corePriority,
             dueHint: cleanedDueDate?.isEmpty == false ? cleanedDueDate : nil,
-            dueDate: cleanedDueDate.flatMap(Self.isoDate),
+            dueDate: cleanedDueDate.flatMap { LocalAssistDates.parse($0) },
             action: nil,
             rationale: nil,
             confidence: nil
         )
-    }
-
-    private static func isoDate(_ value: String) -> Date? {
-        let iso = ISO8601DateFormatter()
-        if let date = iso.date(from: value) {
-            return date
-        }
-        let dateOnly = ISO8601DateFormatter()
-        dateOnly.formatOptions = [.withFullDate]
-        return dateOnly.date(from: value)
     }
 }
 
@@ -99,7 +89,7 @@ extension DailyBrief {
                     title: suggestion.title,
                     priority: suggestion.priority.corePriority,
                     dueHint: cleanedDueDate?.isEmpty == false ? cleanedDueDate : nil,
-                    dueDate: cleanedDueDate.flatMap(Self.isoDate),
+                    dueDate: cleanedDueDate.flatMap { LocalAssistDates.parse($0) },
                     action: nil,
                     rationale: nil,
                     confidence: nil
@@ -109,13 +99,29 @@ extension DailyBrief {
         )
     }
 
-    private static func isoDate(_ value: String) -> Date? {
-        let iso = ISO8601DateFormatter()
-        if let date = iso.date(from: value) {
-            return date
-        }
-        let dateOnly = ISO8601DateFormatter()
-        dateOnly.formatOptions = [.withFullDate]
-        return dateOnly.date(from: value)
-    }
+    /// One-shot example embedded in the session instructions. Because it
+    /// shows the optional task due date both populated and nil, it satisfies
+    /// the guided-generation contract on its own and the schema can be left
+    /// out of every prompt (`includeSchemaInPrompt: false`) — fewer input
+    /// tokens on the first turn, not just repeat turns.
+    static let instructionsExample = DailyBrief(
+        headline: "Beta prep: blockers to Mira by Friday, design sync next week.",
+        keyPoints: [
+            "Mira needs the launch blockers before Friday",
+            "A design sync should be scheduled for next week",
+            "The onboarding doc still needs a review pass",
+        ],
+        tasks: [
+            BriefTaskSuggestion(
+                title: "Send Mira the launch blockers",
+                priority: .high,
+                dueDate: "2026-07-10"
+            ),
+            BriefTaskSuggestion(
+                title: "Review the onboarding doc",
+                priority: .medium,
+                dueDate: nil
+            ),
+        ]
+    )
 }

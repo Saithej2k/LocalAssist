@@ -413,6 +413,70 @@ final class LocalAssistCoreTests: XCTestCase {
         XCTAssertNil(parser.date(from: "someday maybe", relativeTo: now))
     }
 
+    func testBareDueDatesUseTheLocalCalendarDay() throws {
+        // A bare model date like "2026-07-06" means that day where the user
+        // is. Parsing it as GMT midnight shifted it into the previous local
+        // day everywhere west of GMT.
+        let parsed = try XCTUnwrap(LocalAssistDates.parse("2026-07-06"))
+        let components = Calendar.current.dateComponents([.year, .month, .day], from: parsed)
+        XCTAssertEqual(components.year, 2026)
+        XCTAssertEqual(components.month, 7)
+        XCTAssertEqual(components.day, 6)
+        XCTAssertEqual(LocalAssistDates.dateOnlyString(from: parsed), "2026-07-06")
+
+        // Full timestamps still parse as instants.
+        XCTAssertEqual(
+            LocalAssistDates.parse("2026-07-01T12:00:00Z"),
+            Date(timeIntervalSince1970: 1_782_907_200)
+        )
+
+        // Injectable-calendar call sites can pin an explicit zone.
+        let tokyo = try XCTUnwrap(TimeZone(identifier: "Asia/Tokyo"))
+        let tokyoParsed = try XCTUnwrap(LocalAssistDates.parse("2026-07-06", timeZone: tokyo))
+        XCTAssertEqual(LocalAssistDates.dateOnlyString(from: tokyoParsed, timeZone: tokyo), "2026-07-06")
+    }
+
+    func testModelDueTodayTaskSurvivesNormalizationAndRoundtrip() throws {
+        let today = LocalAssistDates.dateOnlyString(from: Date())
+        let partial = StructuredSummaryPartial(
+            overview: "Blockers are due today.",
+            keyPoints: ["Send the blockers today"],
+            suggestions: [
+                TaskSuggestionPartial(
+                    title: "Send Mira the blockers",
+                    priority: .high,
+                    dueHint: today,
+                    action: .messageDraft,
+                    rationale: "The deadline is explicit.",
+                    confidence: 0.9
+                ),
+            ],
+            isComplete: true
+        )
+
+        let summary = try XCTUnwrap(SummaryNormalizer().summary(
+            from: partial,
+            request: AssistantRequest(sourceText: "Send Mira the blockers today."),
+            availability: .available
+        ))
+
+        let dueDate = try XCTUnwrap(summary.suggestions.first?.dueDate)
+        XCTAssertTrue(
+            Calendar.current.isDateInToday(dueDate),
+            "a due-today model date must not be dropped as stale or shifted a day"
+        )
+
+        // Codable roundtrip through saved history keeps the calendar day.
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(
+            StructuredSummary.self,
+            from: SummaryFormatter.jsonData(summary)
+        )
+        let decodedDue = try XCTUnwrap(decoded.suggestions.first?.dueDate)
+        XCTAssertTrue(Calendar.current.isDateInToday(decodedDue))
+    }
+
     func testValidatorPreservesRefinementFlag() throws {
         let validated = try RequestValidator().validate(
             AssistantRequest(sourceText: " only keep urgent tasks ", isRefinement: true)
