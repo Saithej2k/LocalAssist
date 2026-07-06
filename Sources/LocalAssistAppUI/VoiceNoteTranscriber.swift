@@ -41,6 +41,9 @@ public enum VoiceCaptureState: Equatable {
         /// Consecutive error-driven segment restarts with no speech in
         /// between — bounded so a dead recognizer cannot loop forever.
         private var errorRestartCount = 0
+        /// Increments per segment; callbacks from superseded segments are
+        /// ignored so one pause can't spawn duplicate recognition chains.
+        private var segmentGeneration = 0
 
         public init() {}
 
@@ -174,6 +177,9 @@ public enum VoiceCaptureState: Equatable {
         /// dictation chains segments until the user taps stop. Nothing is
         /// lost across pauses.
         private func beginRecognitionSegment(recognizer: SFSpeechRecognizer) {
+            segmentGeneration += 1
+            let generation = segmentGeneration
+
             let request = SFSpeechAudioBufferRecognitionRequest()
             request.shouldReportPartialResults = true
             request.requiresOnDeviceRecognition = true
@@ -191,6 +197,7 @@ public enum VoiceCaptureState: Equatable {
 
                 Task { @MainActor [weak self] in
                     self?.handleRecognition(
+                        generation: generation,
                         latest: latestTranscript,
                         isFinal: isFinal,
                         errorCode: errorCode,
@@ -201,12 +208,15 @@ public enum VoiceCaptureState: Equatable {
         }
 
         private func handleRecognition(
+            generation: Int,
             latest: String?,
             isFinal: Bool,
             errorCode: Int?,
             failureMessage: String?
         ) {
-            guard isRecording else {
+            // Callbacks from a superseded segment (late finals, cancel
+            // errors) must not touch the transcript or spawn restarts.
+            guard isRecording, generation == segmentGeneration else {
                 return
             }
 
@@ -226,23 +236,37 @@ public enum VoiceCaptureState: Equatable {
                 }
             }
 
-            if isFinal || errorCode != nil {
-                // Segment ended (pause finalization, "no speech detected",
-                // or a transient recognizer error). If audio is still
-                // flowing, chain straight into the next segment; a dead
-                // engine or a recognizer stuck in an error loop ends it.
-                if errorCode != nil, latest == nil {
+            guard isFinal || errorCode != nil else {
+                return
+            }
+
+            if !isFinal {
+                // The recognizer often ends a pause with "no speech
+                // detected" instead of a final result. No final means
+                // nothing folded the live partial — fold it here, or the
+                // next segment would overwrite everything already said.
+                let heardNothing = currentSegment.isEmpty && latest == nil
+                finalizedText = Self.joined(finalizedText, currentSegment)
+                currentSegment = ""
+                if !finalizedText.isEmpty {
+                    transcript = finalizedText
+                }
+                if heardNothing {
                     errorRestartCount += 1
                 }
-                if let recognizer = speechRecognizer,
-                   audioEngine?.isRunning == true,
-                   errorRestartCount <= 3 {
-                    beginRecognitionSegment(recognizer: recognizer)
-                } else if let failureMessage {
-                    stopAudio(cancelRecognition: true)
-                    errorMessage = failureMessage
-                    state = .unavailable(failureMessage)
-                }
+            }
+
+            // Segment ended: if audio is still flowing, chain straight into
+            // the next segment; a dead engine or a recognizer stuck in an
+            // error loop ends the session.
+            if let recognizer = speechRecognizer,
+               audioEngine?.isRunning == true,
+               errorRestartCount <= 3 {
+                beginRecognitionSegment(recognizer: recognizer)
+            } else if let failureMessage {
+                stopAudio(cancelRecognition: true)
+                errorMessage = failureMessage
+                state = .unavailable(failureMessage)
             }
         }
 

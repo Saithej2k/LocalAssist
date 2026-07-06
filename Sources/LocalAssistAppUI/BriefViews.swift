@@ -26,6 +26,12 @@ struct SummaryResultView: View {
                 .font(.system(.title3, design: .rounded, weight: .semibold))
                 .fixedSize(horizontal: false, vertical: true)
 
+            // Honest speed: which engine ran and how long it took, so
+            // "slow" is a number instead of a feeling.
+            Text(generationDetail)
+                .font(.system(.caption2, design: .rounded, weight: .medium))
+                .foregroundStyle(.secondary)
+
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(run.summary.keyPoints, id: \.self) { point in
                     Label(point, systemImage: "checkmark.circle.fill")
@@ -73,6 +79,17 @@ struct SuggestionRow: View {
 
     private func actionLabel(for action: SuggestedAction) -> String {
         action.displayTitle
+    }
+}
+
+private extension SummaryResultView {
+    var generationDetail: String {
+        let engine = run.summary.source == .foundationModels ? "on-device model" : "rules engine"
+        let seconds = run.metrics.durationMilliseconds / 1000
+        if seconds < 0.95 {
+            return "\(engine) · \(Int((seconds * 1000).rounded())) ms"
+        }
+        return "\(engine) · \(String(format: "%.1f", seconds)) s"
     }
 }
 
