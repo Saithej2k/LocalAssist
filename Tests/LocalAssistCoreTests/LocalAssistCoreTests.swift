@@ -477,6 +477,21 @@ final class LocalAssistCoreTests: XCTestCase {
         XCTAssertTrue(Calendar.current.isDateInToday(decodedDue))
     }
 
+    func testInputKindInferenceClassifiesWithoutUserChoice() {
+        XCTAssertEqual(
+            AssistantInputKind.inferred(from: "Standup notes: infra is blocked, Priya shares the runbook, book a war room Thursday."),
+            .meeting
+        )
+        XCTAssertEqual(
+            AssistantInputKind.inferred(from: "Pay the electricity bill and book a dentist appointment tomorrow."),
+            .personalAdmin
+        )
+        XCTAssertEqual(
+            AssistantInputKind.inferred(from: "Ship the hotfix build tonight and confirm the rollout with Dana."),
+            .note
+        )
+    }
+
     func testValidatorPreservesRefinementFlag() throws {
         let validated = try RequestValidator().validate(
             AssistantRequest(sourceText: " only keep urgent tasks ", isRefinement: true)

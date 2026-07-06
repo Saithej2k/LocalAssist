@@ -18,6 +18,34 @@ public enum AssistantInputKind: String, Codable, Sendable, CaseIterable {
     case personalAdmin
 }
 
+public extension AssistantInputKind {
+    /// Classifies raw capture text so the user never has to pick a kind.
+    /// Deterministic cue scoring keeps the Instant path and tests stable;
+    /// the Smart prompt additionally asks the model to infer the type itself.
+    static func inferred(from text: String) -> AssistantInputKind {
+        let lowercased = text.lowercased()
+
+        let meetingCues = [
+            "standup", "stand-up", "meeting", "sync", "agenda", "attendees",
+            "action items", "decisions", "retro", "1:1", "war room",
+            "minutes", "follow-ups", "postmortem", "notes:",
+        ]
+        let adminCues = [
+            "bill", "renew", "appointment", "dentist", "doctor", "pay ",
+            "insurance", "groceries", "pharmacy", "vet ", "license",
+            "errand", "subscription", "utility", "rent", "landlord", "dmv",
+        ]
+
+        let meetingScore = meetingCues.filter { lowercased.contains($0) }.count
+        let adminScore = adminCues.filter { lowercased.contains($0) }.count
+
+        if meetingScore == 0, adminScore == 0 {
+            return .note
+        }
+        return meetingScore >= adminScore ? .meeting : .personalAdmin
+    }
+}
+
 /// Why the on-device model cannot serve requests right now.
 ///
 /// Mirrors `SystemLanguageModel.Availability.UnavailableReason` so UI and

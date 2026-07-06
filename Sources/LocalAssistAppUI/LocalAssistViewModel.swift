@@ -123,6 +123,11 @@ public final class LocalAssistViewModel: ObservableObject {
     }
 
     public func summarize() {
+        // The user never picks a capture kind: voice input keeps its kind,
+        // typed or scanned text is classified from its own content.
+        if inputKind != .voiceNote {
+            inputKind = AssistantInputKind.inferred(from: inputText)
+        }
         start(request: AssistantRequest(
             sourceText: inputText,
             maxSuggestions: Self.defaultMaxSuggestions,

@@ -314,7 +314,7 @@ private extension AssistantInputKind {
     var promptGuidance: String {
         switch self {
         case .note:
-            "Create a concise recap, key points, tasks, and safe action drafts."
+            "First infer what kind of capture this is — scattered notes, a meeting recap, errands, or ideas — then create a concise recap, key points, tasks, and safe action drafts to match."
         case .voiceNote:
             "Clean up natural speech, ignore filler words and false starts, preserve intent, and turn commitments into tasks, reminders, calendar candidates, and message drafts."
         case .meeting:

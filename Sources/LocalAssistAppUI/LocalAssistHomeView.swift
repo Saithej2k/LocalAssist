@@ -347,13 +347,9 @@ private struct ModelModePill: View {
                 .disabled(unavailabilityReason == .modelNotReady && !usesSmartModel)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(LocalAssistColors.surface.opacity(0.74), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(LocalAssistColors.border.opacity(0.55))
-        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .glassEffect()
         .accessibilityLabel(accessibilityDescription)
     }
 
@@ -511,81 +507,26 @@ private struct TodayMetric: View {
     }
 }
 
+/// One text box, one mic, one primary action, one clear — the app figures
+/// out what the text is (meeting recap, errands, notes) so the user never
+/// files their own thoughts into categories. Controls float on Liquid Glass;
+/// the editor stays a plain content surface, per the platform's layering.
 private struct InputComposerView: View {
     @ObservedObject var viewModel: LocalAssistViewModel
     @ObservedObject var voiceTranscriber: VoiceNoteTranscriber
     var onScan: () -> Void
     @FocusState private var editorFocused: Bool
 
+    private var hasText: Bool {
+        !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Hero: the mic is the primary way in. Typing is the fallback.
-            HStack(alignment: .center, spacing: 14) {
-                Button {
-                    if voiceTranscriber.isRecording {
-                        CaptureHaptics.recordStop()
-                        voiceTranscriber.stop()
-                    } else {
-                        CaptureHaptics.recordStart()
-                        viewModel.inputKind = .voiceNote
-                        Task {
-                            await voiceTranscriber.start()
-                        }
-                    }
-                } label: {
-                    Image(systemName: voiceTranscriber.isRecording ? "stop.fill" : "mic.fill")
-                        .font(.system(size: 26, weight: .bold))
-                        .frame(width: 72, height: 72)
-                }
-                .buttonStyle(VoiceButtonStyle(isRecording: voiceTranscriber.isRecording))
-                .disabled(viewModel.isGenerating || voiceTranscriber.state == .requestingPermission)
-                .accessibilityLabel(voiceTranscriber.isRecording ? "Stop voice capture" : "Start voice capture")
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(voiceTranscriber.isRecording ? "Listening…" : "Capture a thought")
-                        .font(.system(.headline, design: .rounded, weight: .bold))
-                    Text(voiceTranscriber.isRecording
-                        ? "Speak naturally. Tap stop when you're done."
-                        : "Tap the mic and say it — tasks, errands, follow-ups.")
-                        .font(.system(.caption, design: .rounded, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if voiceTranscriber.isRecording {
-                        VoiceLevelBars()
-                    }
-                }
-                Spacer(minLength: 0)
-
-                #if os(iOS)
-                    Button(action: onScan) {
-                        VStack(spacing: 3) {
-                            Image(systemName: "doc.viewfinder")
-                                .font(.system(size: 19, weight: .bold))
-                            Text("Scan")
-                                .font(.system(.caption2, design: .rounded, weight: .bold))
-                        }
-                        .frame(width: 52, height: 52)
-                    }
-                    .buttonStyle(SecondaryIconButtonStyle())
-                    .disabled(viewModel.isGenerating || voiceTranscriber.isRecording)
-                    .accessibilityLabel("Scan text with the camera")
-                #endif
-            }
-
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 78), spacing: 8)], spacing: 8) {
-                ForEach(AssistantInputKind.allCases, id: \.self) { kind in
-                    CaptureKindChip(
-                        kind: kind,
-                        isSelected: viewModel.inputKind == kind,
-                        action: { viewModel.inputKind = kind }
-                    )
-                }
-            }
-
+        VStack(alignment: .leading, spacing: 14) {
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $viewModel.inputText)
                     .font(.system(.body, design: .rounded))
-                    .frame(minHeight: 158)
+                    .frame(minHeight: 150)
                     .padding(12)
                     .scrollContentBackground(.hidden)
                     .focused($editorFocused)
@@ -601,8 +542,8 @@ private struct InputComposerView: View {
                         }
                     }
 
-                if viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(viewModel.inputKind.placeholder)
+                if !hasText {
+                    Text("What's on your mind? Tasks, meeting notes, errands — say it, scan it, or type it.")
                         .font(.system(.body, design: .rounded))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 17)
@@ -610,19 +551,20 @@ private struct InputComposerView: View {
                         .allowsHitTesting(false)
                 }
             }
-            .background(LocalAssistColors.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(LocalAssistColors.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(LocalAssistColors.border)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(LocalAssistColors.border.opacity(0.6))
             }
             // One-tap clear, right where the text is — not buried in Settings.
             .overlay(alignment: .topTrailing) {
                 if !viewModel.inputText.isEmpty {
                     Button {
                         viewModel.inputText = ""
+                        viewModel.inputKind = .note
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 18))
+                            .font(.system(size: 19))
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
@@ -635,35 +577,70 @@ private struct InputComposerView: View {
                 CompactVoiceStatusView(transcriber: voiceTranscriber)
             }
 
-            HStack(spacing: 10) {
-                Button {
-                    editorFocused = false
-                    viewModel.summarize()
-                } label: {
-                    Label(viewModel.isGenerating ? "Working" : "Review Actions", systemImage: "checklist.checked")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(PrimaryButtonStyle())
-                .disabled(
-                    viewModel.isGenerating
-                        || voiceTranscriber.isRecording
-                        || viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                )
-
-                if viewModel.isGenerating {
+            // Control row: everything actionable lives on one glass shelf.
+            GlassEffectContainer(spacing: 12) {
+                HStack(spacing: 12) {
                     Button {
-                        viewModel.cancel()
+                        if voiceTranscriber.isRecording {
+                            CaptureHaptics.recordStop()
+                            voiceTranscriber.stop()
+                        } else {
+                            CaptureHaptics.recordStart()
+                            viewModel.inputKind = .voiceNote
+                            Task {
+                                await voiceTranscriber.start()
+                            }
+                        }
                     } label: {
-                        Label("Stop", systemImage: "stop.fill")
-                            .labelStyle(.iconOnly)
-                            .frame(width: 44, height: 44)
+                        Image(systemName: voiceTranscriber.isRecording ? "stop.fill" : "mic.fill")
+                            .font(.system(size: 20, weight: .bold))
+                            .frame(width: 30, height: 30)
                     }
-                    .buttonStyle(SecondaryIconButtonStyle())
-                    .accessibilityLabel("Cancel generation")
+                    .buttonStyle(.glassProminent)
+                    .tint(voiceTranscriber.isRecording ? LocalAssistColors.danger : LocalAssistColors.accent)
+                    .disabled(viewModel.isGenerating || voiceTranscriber.state == .requestingPermission)
+                    .accessibilityLabel(voiceTranscriber.isRecording ? "Stop voice capture" : "Start voice capture")
+
+                    #if os(iOS)
+                        Button(action: onScan) {
+                            Image(systemName: "doc.viewfinder")
+                                .font(.system(size: 18, weight: .semibold))
+                                .frame(width: 30, height: 30)
+                        }
+                        .buttonStyle(.glass)
+                        .disabled(viewModel.isGenerating || voiceTranscriber.isRecording)
+                        .accessibilityLabel("Scan text with the camera")
+                    #endif
+
+                    Spacer(minLength: 0)
+
+                    if viewModel.isGenerating {
+                        Button {
+                            viewModel.cancel()
+                        } label: {
+                            Label("Stop", systemImage: "stop.fill")
+                                .font(.system(.body, design: .rounded, weight: .bold))
+                                .frame(height: 30)
+                        }
+                        .buttonStyle(.glass)
+                        .accessibilityLabel("Cancel generation")
+                    } else {
+                        Button {
+                            editorFocused = false
+                            viewModel.summarize()
+                        } label: {
+                            Label("Capture", systemImage: "sparkles")
+                                .font(.system(.body, design: .rounded, weight: .bold))
+                                .frame(height: 30)
+                        }
+                        .buttonStyle(.glassProminent)
+                        .tint(LocalAssistColors.accent)
+                        .disabled(voiceTranscriber.isRecording || !hasText)
+                        .accessibilityLabel("Capture and review actions")
+                    }
                 }
             }
         }
-        .panel()
         .onChange(of: voiceTranscriber.transcript) { _, newValue in
             guard !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 return
@@ -671,28 +648,6 @@ private struct InputComposerView: View {
             viewModel.inputKind = .voiceNote
             viewModel.inputText = newValue
         }
-    }
-}
-
-private struct CaptureKindChip: View {
-    var kind: AssistantInputKind
-    var isSelected: Bool
-    var action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Label(kind.shortTitle, systemImage: kind.symbol)
-                .font(.system(.caption, design: .rounded, weight: .bold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 9)
-                .foregroundStyle(isSelected ? .white : LocalAssistColors.ink)
-                .background(isSelected ? LocalAssistColors.accent : LocalAssistColors.row, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Capture as \(kind.shortTitle)")
     }
 }
 
@@ -1443,41 +1398,6 @@ private struct SecondaryActionButtonStyle: ButtonStyle {
     }
 }
 
-private struct SecondaryIconButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 16, weight: .bold))
-            .foregroundStyle(LocalAssistColors.ink)
-            .background(configuration.isPressed ? LocalAssistColors.row.opacity(0.7) : LocalAssistColors.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(LocalAssistColors.border)
-            }
-    }
-}
-
-private struct VoiceButtonStyle: ButtonStyle {
-    var isRecording: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 18, weight: .bold))
-            .foregroundStyle(isRecording ? .white : LocalAssistColors.accent)
-            .background(background(configuration), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(isRecording ? Color.clear : LocalAssistColors.border)
-            }
-    }
-
-    private func background(_ configuration: Configuration) -> Color {
-        if isRecording {
-            return configuration.isPressed ? LocalAssistColors.danger.opacity(0.78) : LocalAssistColors.danger
-        }
-        return configuration.isPressed ? LocalAssistColors.row.opacity(0.7) : LocalAssistColors.surface
-    }
-}
-
 private extension View {
     func panel() -> some View {
         padding(16)
@@ -1500,32 +1420,6 @@ private extension AssistantInputKind {
             "Meeting"
         case .personalAdmin:
             "Admin"
-        }
-    }
-
-    var sourceTitle: String {
-        switch self {
-        case .note:
-            "Source notes"
-        case .voiceNote:
-            "Voice transcript"
-        case .meeting:
-            "Meeting notes"
-        case .personalAdmin:
-            "Admin notes"
-        }
-    }
-
-    var placeholder: String {
-        switch self {
-        case .note:
-            "Paste notes, reminders, or scattered thoughts..."
-        case .voiceNote:
-            "Tap the mic to dictate, or edit the transcript here..."
-        case .meeting:
-            "Paste meeting notes, decisions, owners, and open questions..."
-        case .personalAdmin:
-            "Add errands, appointments, bills, calls, renewals, or household follow-ups..."
         }
     }
 
