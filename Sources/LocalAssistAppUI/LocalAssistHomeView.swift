@@ -445,7 +445,7 @@ private struct InputComposerView: View {
             GlassEffectContainer(spacing: 12) {
                 HStack(spacing: 12) {
                     Button {
-                        if voiceTranscriber.isRecording {
+                        if voiceTranscriber.state.isActive {
                             CaptureHaptics.recordStop()
                             voiceTranscriber.stop()
                         } else {
@@ -458,14 +458,14 @@ private struct InputComposerView: View {
                             }
                         }
                     } label: {
-                        Image(systemName: voiceTranscriber.isRecording ? "stop.fill" : "mic.fill")
+                        Image(systemName: voiceTranscriber.state.isActive ? "stop.fill" : "mic.fill")
                             .font(.system(size: 20, weight: .bold))
                             .frame(width: 36, height: 36)
                     }
                     .buttonStyle(.glassProminent)
-                    .tint(voiceTranscriber.isRecording ? LocalAssistColors.danger : LocalAssistColors.accent)
-                    .disabled(viewModel.isGenerating || voiceTranscriber.state == .requestingPermission)
-                    .accessibilityLabel(voiceTranscriber.isRecording ? "Stop voice capture" : "Start voice capture")
+                    .tint(voiceTranscriber.state.isActive ? LocalAssistColors.danger : LocalAssistColors.accent)
+                    .disabled(viewModel.isGenerating)
+                    .accessibilityLabel(voiceTranscriber.state.isActive ? "Stop voice capture" : "Start voice capture")
 
                     #if os(iOS)
                         // System "Scan Text" camera (the AutoFill flow) —

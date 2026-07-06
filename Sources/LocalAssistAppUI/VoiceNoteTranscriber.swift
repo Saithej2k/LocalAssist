@@ -18,6 +18,12 @@ public enum VoiceCaptureState: Equatable {
     public var isRecording: Bool {
         self == .recording
     }
+
+    /// Recording or spinning up — the mic button shows "stop" for both so
+    /// the tap feels instant.
+    public var isActive: Bool {
+        self == .recording || self == .requestingPermission
+    }
 }
 
 #if os(iOS) && canImport(AVFoundation) && canImport(Speech)
@@ -285,12 +291,14 @@ public enum VoiceCaptureState: Equatable {
             }
         }
 
+        /// Detaches the heavy teardown (engine stop, session deactivation —
+        /// each can block for hundreds of milliseconds) so stopping feels
+        /// instant. State is cleared synchronously; the next start creates
+        /// fresh objects, so the detached cleanup can never race a new
+        /// session.
         private func stopAudio(cancelRecognition: Bool) {
-            if audioEngine?.isRunning == true {
-                audioEngine?.stop()
-            }
-            audioEngine?.inputNode.removeTap(onBus: 0)
-            requestRelay.request?.endAudio()
+            let engine = audioEngine
+            let request = requestRelay.request
             if cancelRecognition {
                 recognitionTask?.cancel()
             }
@@ -298,7 +306,20 @@ public enum VoiceCaptureState: Equatable {
             requestRelay.request = nil
             audioEngine = nil
             speechRecognizer = nil
-            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+
+            guard engine != nil || request != nil else {
+                return
+            }
+            let box = UncheckedSendable(value: (engine, request))
+            Task.detached(priority: .userInitiated) {
+                let (engine, request) = box.value
+                if engine?.isRunning == true {
+                    engine?.stop()
+                }
+                engine?.inputNode.removeTap(onBus: 0)
+                request?.endAudio()
+                try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            }
         }
     }
 

@@ -91,15 +91,27 @@ public struct SummaryNormalizer: Sendable {
         Calendar.current.startOfDay(for: date) < Calendar.current.startOfDay(for: generatedAt)
     }
 
+    /// Mirrors the rules engine's verb routing so both paths agree on what
+    /// a title means. "text " keeps its trailing space so words like
+    /// "context" don't become message drafts.
     private static func inferAction(from title: String) -> SuggestedAction {
         let lowercased = title.lowercased()
-        if lowercased.contains("schedule") || lowercased.contains("book") || lowercased.contains("sync") {
+        let calendarCues = ["schedule", "book", "sync"]
+        if calendarCues.contains(where: lowercased.contains) {
             return .calendarHold
         }
-        if lowercased.contains("send") || lowercased.contains("email") || lowercased.contains("message") || lowercased.contains("share") {
+        let messageCues = ["send", "email", "message", "share", "text "]
+        if messageCues.contains(where: lowercased.contains) {
             return .messageDraft
         }
-        if lowercased.contains("add") || lowercased.contains("check") || lowercased.contains("update") {
+        // Call/pick up/pay outrank checklist cues: "Call the pharmacy to
+        // check on refills" is a reminder, not a checklist item.
+        let reminderCues = ["call", "pick up", "pay"]
+        if reminderCues.contains(where: lowercased.contains) {
+            return .reminder
+        }
+        let checklistCues = ["add", "check", "update"]
+        if checklistCues.contains(where: lowercased.contains) {
             return .checklistItem
         }
         return .reminder

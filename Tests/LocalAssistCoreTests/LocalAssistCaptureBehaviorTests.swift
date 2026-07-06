@@ -224,6 +224,32 @@ final class LocalAssistCaptureBehaviorTests: XCTestCase {
         XCTAssertTrue(dictation.transcript.hasSuffix("Book the dentist for next week."))
     }
 
+    func testSmartPathInfersActionsForTextAndCallVerbs() throws {
+        // The model's schema carries no action field, so actions are always
+        // inferred from titles — the Smart path must route the same verbs
+        // as the rules engine ("Text Priya" is a message, not a reminder).
+        let partial = StructuredSummaryPartial(
+            overview: "Family errands for the week.",
+            keyPoints: ["Several follow-ups today"],
+            suggestions: [
+                TaskSuggestionPartial(title: "Text Priya about Sunday brunch", priority: .low),
+                TaskSuggestionPartial(title: "Call the pharmacy to check on refills", priority: .medium),
+                TaskSuggestionPartial(title: "Email the landlord about the heater", priority: .high),
+                TaskSuggestionPartial(title: "Update the packing checklist", priority: .low),
+            ],
+            isComplete: true
+        )
+
+        let summary = try XCTUnwrap(SummaryNormalizer().summary(
+            from: partial,
+            request: AssistantRequest(sourceText: "irrelevant"),
+            availability: .available
+        ))
+
+        let actions = summary.suggestions.map(\.action)
+        XCTAssertEqual(actions, [.messageDraft, .reminder, .messageDraft, .checklistItem])
+    }
+
     func testInputKindInferenceClassifiesWithoutUserChoice() {
         XCTAssertEqual(
             AssistantInputKind.inferred(from: "Standup notes: infra is blocked, Priya shares the runbook, book a war room Thursday."),
