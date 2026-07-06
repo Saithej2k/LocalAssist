@@ -1576,9 +1576,10 @@ private struct OnboardingRow: View {
 
 private struct SettingsFormView: View {
     @ObservedObject var viewModel: LocalAssistViewModel
-    /// Cached so the O(history) markdown build runs on appearance and
+    /// Cached so the O(history) export builds run on appearance and
     /// history changes, not on every Form render.
-    @State private var historyExport = ""
+    @State private var markdownExportURL: URL?
+    @State private var jsonExportURL: URL?
 
     private var smartModeAvailable: Bool {
         viewModel.availability?.unavailability?.reason != .deviceNotEligible
@@ -1621,10 +1622,22 @@ private struct SettingsFormView: View {
             }
 
             Section {
-                ShareLink(item: historyExport) {
+                if let markdownExportURL {
+                    ShareLink(item: markdownExportURL) {
+                        Label("Export history (Markdown)", systemImage: "square.and.arrow.up")
+                    }
+                } else {
                     Label("Export history (Markdown)", systemImage: "square.and.arrow.up")
+                        .foregroundStyle(.secondary)
                 }
-                .disabled(viewModel.history.isEmpty)
+                if let jsonExportURL {
+                    ShareLink(item: jsonExportURL) {
+                        Label("Export history (JSON)", systemImage: "curlybraces.square")
+                    }
+                } else {
+                    Label("Export history (JSON)", systemImage: "curlybraces.square")
+                        .foregroundStyle(.secondary)
+                }
                 Button {
                     viewModel.clearDraft()
                 } label: {
@@ -1642,11 +1655,17 @@ private struct SettingsFormView: View {
             }
         }
         .onAppear {
-            historyExport = viewModel.exportMarkdown()
+            refreshExports()
         }
         .onChange(of: viewModel.history) { _, _ in
-            historyExport = viewModel.exportMarkdown()
+            refreshExports()
         }
+    }
+
+    private func refreshExports() {
+        let exports = viewModel.exportFileURLs()
+        markdownExportURL = exports.markdown
+        jsonExportURL = exports.json
     }
 
     private var smartModeBinding: Binding<Bool> {

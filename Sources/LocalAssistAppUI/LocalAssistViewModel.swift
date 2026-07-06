@@ -315,6 +315,38 @@ public final class LocalAssistViewModel: ObservableObject {
         }
     }
 
+    /// Writes both history exports to temporary files for the share sheet:
+    /// JSON is the app's exact history format, Markdown is human-readable.
+    /// Files share far better than raw strings — AirDrop, Save to Files,
+    /// and Mail all treat them as documents.
+    public func exportFileURLs() -> (markdown: URL?, json: URL?) {
+        guard !history.isEmpty else {
+            return (nil, nil)
+        }
+
+        let stamp = LocalAssistDates.dateOnlyString(from: Date())
+        let directory = FileManager.default.temporaryDirectory
+
+        var markdownURL: URL?
+        let markdownCandidate = directory.appendingPathComponent("LocalAssist-history-\(stamp).md")
+        if let data = exportMarkdown().data(using: .utf8),
+           (try? data.write(to: markdownCandidate, options: .atomic)) != nil {
+            markdownURL = markdownCandidate
+        }
+
+        var jsonURL: URL?
+        let jsonCandidate = directory.appendingPathComponent("LocalAssist-history-\(stamp).json")
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let data = try? encoder.encode(history),
+           (try? data.write(to: jsonCandidate, options: .atomic)) != nil {
+            jsonURL = jsonCandidate
+        }
+
+        return (markdownURL, jsonURL)
+    }
+
     /// Markdown export of the entire local history — the data is the user's.
     public func exportMarkdown() -> String {
         var lines = ["# LocalAssist history", ""]
