@@ -105,20 +105,20 @@ extension DailyBrief {
     /// out of every prompt (`includeSchemaInPrompt: false`) — fewer input
     /// tokens on the first turn, not just repeat turns.
     static let instructionsExample = DailyBrief(
-        headline: "Beta prep: blockers to Mira by Friday, design sync next week.",
+        headline: "Family catch-up tonight, cake pickup Saturday, dentist still to book.",
         keyPoints: [
-            "Mira needs the launch blockers before Friday",
-            "A design sync should be scheduled for next week",
-            "The onboarding doc still needs a review pass",
+            "Mom is expecting a call tonight",
+            "The birthday cake is ready for pickup on Saturday",
+            "A dentist appointment still needs to be booked",
         ],
         tasks: [
             BriefTaskSuggestion(
-                title: "Send Mira the launch blockers",
+                title: "Call Mom to check in",
                 priority: .high,
                 dueDate: "2026-07-10"
             ),
             BriefTaskSuggestion(
-                title: "Review the onboarding doc",
+                title: "Book a dentist appointment",
                 priority: .medium,
                 dueDate: nil
             ),

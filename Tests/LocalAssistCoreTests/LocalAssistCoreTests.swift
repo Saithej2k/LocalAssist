@@ -477,6 +477,36 @@ final class LocalAssistCoreTests: XCTestCase {
         XCTAssertTrue(Calendar.current.isDateInToday(decodedDue))
     }
 
+    func testNormalizerPrefersDeterministicDayNamesOverModelDates() throws {
+        // The model resolved "by Wednesday" to a Tuesday; the title still
+        // names the day, so the deterministic parser must correct it.
+        let wrongModelDate = Calendar.current.date(byAdding: .day, value: 8, to: Date())
+        let partial = StructuredSummaryPartial(
+            overview: "Tax paperwork is due midweek.",
+            keyPoints: ["The tax paperwork is due by Wednesday"],
+            suggestions: [
+                TaskSuggestionPartial(
+                    title: "Finish the tax paperwork by Wednesday",
+                    priority: .high,
+                    dueDate: wrongModelDate
+                ),
+            ],
+            isComplete: true
+        )
+
+        let summary = try XCTUnwrap(SummaryNormalizer().summary(
+            from: partial,
+            request: AssistantRequest(sourceText: "Finish the tax paperwork by Wednesday."),
+            availability: .available
+        ))
+
+        let dueDate = try XCTUnwrap(summary.suggestions.first?.dueDate)
+        XCTAssertEqual(
+            Calendar.current.component(.weekday, from: dueDate), 4,
+            "a title naming Wednesday must resolve to an actual Wednesday"
+        )
+    }
+
     func testInputKindInferenceClassifiesWithoutUserChoice() {
         XCTAssertEqual(
             AssistantInputKind.inferred(from: "Standup notes: infra is blocked, Priya shares the runbook, book a war room Thursday."),

@@ -58,7 +58,14 @@ public struct SummaryNormalizer: Sendable {
             .cleanedBullet()
             .withoutSchemaPlaceholder
             .nilIfEmpty
-        let parsedDueDate = partial.dueDate ?? dueHint.flatMap { LocalAssistDates.parse($0) }
+        // The on-device model's calendar arithmetic is unreliable — "by
+        // Wednesday" sometimes lands on a Tuesday. When the task title
+        // itself names a relative day, the deterministic parser wins;
+        // the model's date only stands when the title carries no signal.
+        let titleResolvedDate = Self.dateParser.date(from: title, relativeTo: generatedAt)
+        let parsedDueDate = titleResolvedDate
+            ?? partial.dueDate
+            ?? dueHint.flatMap { LocalAssistDates.parse($0) }
         let dueDate = parsedDueDate.flatMap {
             Self.isStale($0, relativeTo: generatedAt) ? nil : $0
         }
@@ -77,6 +84,8 @@ public struct SummaryNormalizer: Sendable {
             confidence: min(max(partial.confidence ?? 0.72, 0), 1)
         )
     }
+
+    private static let dateParser = DueDateParser()
 
     private static func isStale(_ date: Date, relativeTo generatedAt: Date) -> Bool {
         Calendar.current.startOfDay(for: date) < Calendar.current.startOfDay(for: generatedAt)

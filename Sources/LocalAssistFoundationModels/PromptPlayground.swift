@@ -20,7 +20,7 @@
 
         // Swap the note to test how the model handles new phrasings.
         let response = try await session.respond(
-            to: "Review the onboarding doc, send Mira the blockers by Friday, and schedule a design sync next week.",
+            to: "Call Mom tonight, pick up the birthday cake Saturday morning, and book a dentist appointment for next week.",
             generating: DailyBrief.self,
             includeSchemaInPrompt: true
         )

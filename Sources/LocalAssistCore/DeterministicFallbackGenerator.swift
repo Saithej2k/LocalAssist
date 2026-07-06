@@ -201,9 +201,9 @@ private enum TaskClassifier {
     private static let actionVerbs = [
         "add", "ask", "assign", "book", "buy", "call", "cancel", "check",
         "confirm", "create", "decide", "draft", "email", "finish", "follow",
-        "invite", "order", "pay", "prepare", "renew", "reschedule", "return",
-        "review", "schedule", "send", "share", "ship", "submit", "summarize",
-        "update", "write"
+        "invite", "order", "pay", "pick up", "prepare", "renew", "reschedule",
+        "return", "review", "schedule", "send", "share", "ship", "submit",
+        "summarize", "text", "update", "write"
     ]
     private static let urgencyCues = [
         "urgent", "asap", "today", "tomorrow", "tonight", "deadline",
@@ -288,10 +288,11 @@ private enum TaskClassifier {
         if lowercased.contains("schedule") || lowercased.contains("book") || lowercased.contains("sync") {
             return .calendarHold
         }
-        if lowercased.contains("send") || lowercased.contains("email") || lowercased.contains("message") {
+        // "text " keeps its trailing space so words like "context" don't match.
+        if lowercased.contains("send") || lowercased.contains("email") || lowercased.contains("message") || lowercased.contains("text ") {
             return .messageDraft
         }
-        if lowercased.contains("review") || lowercased.contains("finish") || lowercased.contains("follow") {
+        if lowercased.contains("review") || lowercased.contains("finish") || lowercased.contains("follow") || lowercased.contains("call") || lowercased.contains("pick up") || lowercased.contains("pay") {
             return .reminder
         }
         if lowercased.contains("add")

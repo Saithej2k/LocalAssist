@@ -14,6 +14,7 @@ private enum AppTab: Hashable {
     case capture
     case today
     case history
+    case settings
 }
 
 public struct LocalAssistHomeView: View {
@@ -21,7 +22,6 @@ public struct LocalAssistHomeView: View {
     @StateObject private var voiceTranscriber = VoiceNoteTranscriber()
     @State private var selectedTab: AppTab = .capture
     @State private var didRunLaunchAutomation = false
-    @State private var showsSettings = false
     @State private var showsOnboarding = false
     @AppStorage("localassist.hasOnboarded") private var hasOnboarded = false
     @Environment(\.openURL) private var openURL
@@ -35,7 +35,7 @@ public struct LocalAssistHomeView: View {
         TabView(selection: $selectedTab) {
             captureTab
                 .tabItem {
-                    Label("Capture", systemImage: "square.and.pencil")
+                    Label("Home", systemImage: "house.fill")
                 }
                 .tag(AppTab.capture)
 
@@ -51,6 +51,12 @@ public struct LocalAssistHomeView: View {
                     Label("History", systemImage: "clock.arrow.circlepath")
                 }
                 .tag(AppTab.history)
+
+            settingsTab
+                .tabItem {
+                    Label("Settings", systemImage: "gearshape.fill")
+                }
+                .tag(AppTab.settings)
         }
         .task {
             viewModel.prewarm()
@@ -97,22 +103,11 @@ public struct LocalAssistHomeView: View {
     private var captureTab: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                // Compact top-left header: app name where every app puts it,
-                // settings on the trailing edge, no dead navigation chrome.
-                HStack(alignment: .center) {
-                    Text("local assist")
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
-                    Spacer(minLength: 12)
-                    Button {
-                        showsSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                            .font(.system(size: 16, weight: .semibold))
-                            .frame(width: 26, height: 26)
-                    }
-                    .buttonStyle(.glass)
-                    .accessibilityLabel("Settings")
-                }
+                // Centered wordmark; settings lives in the tab bar with
+                // everything else, so the header is just the name.
+                Text("local assist")
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .frame(maxWidth: .infinity, alignment: .center)
 
                 ModelModePill(
                     usesSmartModel: viewModel.usesSmartModel,
@@ -166,8 +161,12 @@ public struct LocalAssistHomeView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .background(LocalAssistColors.canvas)
-        .sheet(isPresented: $showsSettings) {
-            SettingsSheetView(viewModel: viewModel)
+    }
+
+    private var settingsTab: some View {
+        NavigationStack {
+            SettingsFormView(viewModel: viewModel)
+                .navigationTitle("Settings")
         }
     }
 
@@ -1573,9 +1572,8 @@ private struct OnboardingRow: View {
     }
 }
 
-private struct SettingsSheetView: View {
+private struct SettingsFormView: View {
     @ObservedObject var viewModel: LocalAssistViewModel
-    @Environment(\.dismiss) private var dismiss
 
     private var smartModeAvailable: Bool {
         viewModel.availability?.unavailability?.reason != .deviceNotEligible
@@ -1590,68 +1588,53 @@ private struct SettingsSheetView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    if smartModeAvailable {
-                        Toggle(isOn: smartModeBinding) {
-                            Label("Smart brief (on-device AI)", systemImage: "brain.head.profile")
-                        }
-                        .disabled(viewModel.availability?.unavailability?.reason == .modelNotReady)
-                    } else {
-                        Label("Smart brief not supported on this device", systemImage: "brain.head.profile")
-                            .foregroundStyle(.secondary)
+        Form {
+            Section {
+                if smartModeAvailable {
+                    Toggle(isOn: smartModeBinding) {
+                        Label("Smart brief (on-device AI)", systemImage: "brain.head.profile")
                     }
-                } header: {
-                    Text("Processing")
-                } footer: {
-                    Text(processingFooter)
+                    .disabled(viewModel.availability?.unavailability?.reason == .modelNotReady)
+                } else {
+                    Label("Smart brief not supported on this device", systemImage: "brain.head.profile")
+                        .foregroundStyle(.secondary)
                 }
-
-                Section {
-                    Toggle(isOn: morningBriefBinding) {
-                        Label("Morning brief at 8:30", systemImage: "sun.max.fill")
-                    }
-                } header: {
-                    Text("Daily moment")
-                } footer: {
-                    Text("One local notification each morning with what's due today and what you captured yesterday. Scheduled on device — nothing is sent anywhere.")
-                }
-
-                Section {
-                    ShareLink(item: viewModel.exportMarkdown()) {
-                        Label("Export history (Markdown)", systemImage: "square.and.arrow.up")
-                    }
-                    .disabled(viewModel.history.isEmpty)
-                    Button {
-                        viewModel.clearDraft()
-                        dismiss()
-                    } label: {
-                        Label("Clear current draft", systemImage: "xmark.circle")
-                    }
-                    Button(role: .destructive) {
-                        viewModel.clearHistory()
-                        dismiss()
-                    } label: {
-                        Label("Clear history", systemImage: "trash")
-                    }
-                } header: {
-                    Text("Data")
-                } footer: {
-                    Text("History lives in a private JSON file in the app's container.")
-                }
+            } header: {
+                Text("Processing")
+            } footer: {
+                Text(processingFooter)
             }
-            .navigationTitle("Settings")
-            #if os(iOS)
-                .navigationBarTitleDisplayMode(.inline)
-            #endif
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") {
-                            dismiss()
-                        }
-                    }
+
+            Section {
+                Toggle(isOn: morningBriefBinding) {
+                    Label("Morning brief at 8:30", systemImage: "sun.max.fill")
                 }
+            } header: {
+                Text("Daily moment")
+            } footer: {
+                Text("One local notification each morning with what's due today and what you captured yesterday. Scheduled on device — nothing is sent anywhere.")
+            }
+
+            Section {
+                ShareLink(item: viewModel.exportMarkdown()) {
+                    Label("Export history (Markdown)", systemImage: "square.and.arrow.up")
+                }
+                .disabled(viewModel.history.isEmpty)
+                Button {
+                    viewModel.clearDraft()
+                } label: {
+                    Label("Clear current draft", systemImage: "xmark.circle")
+                }
+                Button(role: .destructive) {
+                    viewModel.clearHistory()
+                } label: {
+                    Label("Clear history", systemImage: "trash")
+                }
+            } header: {
+                Text("Data")
+            } footer: {
+                Text("History lives in a private JSON file in the app's container.")
+            }
         }
     }
 

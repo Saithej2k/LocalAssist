@@ -102,7 +102,7 @@ struct DueTodayEntry: TimelineEntry {
 
 struct DueTodayProvider: TimelineProvider {
     func placeholder(in _: Context) -> DueTodayEntry {
-        DueTodayEntry(date: .now, openCount: 2, doneCount: 1, topTitles: ["Send Mira the blockers"], relevance: nil)
+        DueTodayEntry(date: .now, openCount: 2, doneCount: 1, topTitles: ["Pick up the birthday cake"], relevance: nil)
     }
 
     func getSnapshot(in _: Context, completion: @escaping (DueTodayEntry) -> Void) {

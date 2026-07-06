@@ -343,8 +343,8 @@ public final class LocalAssistViewModel: ObservableObject {
     }
 
     public static let sampleInput = """
-    Review the onboarding doc, send Mira the blockers by Friday, and schedule a design sync next week. \
-    Update the launch checklist before the beta build ships.
+    Call Mom tonight to check in, text Priya about Sunday brunch, and pick up the birthday cake \
+    Saturday morning. Book a dentist appointment for next week and pay the electricity bill by Friday.
     """
 }
 

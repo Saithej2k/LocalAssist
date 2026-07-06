@@ -24,7 +24,7 @@ entries. No account. No API key. No network.
 
 ## Why
 
-The moment after you say *"I owe Mira the blockers by Friday and need to book a design sync next week"* is where plans go to die. Cloud tools solve this by uploading your voice and your work conversations to a server. LocalAssist solves it without letting a single byte leave the device:
+The moment after you say *"call Mom tonight, grab the birthday cake Saturday, and get the dentist booked before next week"* is where plans go to die. Cloud tools solve this by uploading your voice and your personal life to a server. LocalAssist solves it without letting a single byte leave the device:
 
 - **Private by design** — capture, transcription, and summarization all run on the phone. Airplane mode is a supported configuration, not an error state.
 - **Two on-device modes** — *Smart brief* uses Apple's Foundation Models framework with constrained decoding; *Instant brief* uses a deterministic rules engine that works on every device, even where Apple Intelligence doesn't. Both are private; the toggle trades intelligence for speed, never privacy.
@@ -73,10 +73,10 @@ The engine details that matter:
 # Full Xcode toolchain required: plain CommandLineTools builds but silently skips XCTest.
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 
-swift test                              # 42 tests
+swift test                              # 43 tests
 swift run localassist-selftest          # 47 end-to-end checks
 swift run localassist-eval --min-score 0.9
-swift run localassist --text "Send Mira the blockers by Friday and schedule a design sync next week." --plain
+swift run localassist --text "Call Mom tonight, pick up the birthday cake Saturday, and book the dentist for next week." --plain
 swift run localassist-bench --iterations 100 --warmup 5 --concurrency 4
 
 # iOS app
@@ -92,7 +92,7 @@ Verification is deterministic and CI-gated — no LLM judges, no flaky assertion
 
 | Check | What it covers | Status |
 | --- | --- | --- |
-| `swift test` (42) | Fallback policy, error taxonomy, typed streaming order, map-reduce chunking, task completion persistence, cancellation, concurrency, due-date parsing, local-day due-date policy, capture-kind inference, tool calls, executor writes, conversation memory, legacy decode, eval scorers | ✅ |
+| `swift test` (43) | Fallback policy, error taxonomy, typed streaming order, map-reduce chunking, task completion persistence, cancellation, concurrency, due-date parsing, local-day due-date policy, capture-kind inference, tool calls, executor writes, conversation memory, legacy decode, eval scorers | ✅ |
 | `localassist-selftest` (47) | End-to-end scenario checks runnable on any machine | ✅ |
 | `localassist-eval` | Task recall, due-date accuracy, action mapping, structure compliance, hallucination probes over a fixed dataset; dated reports in [docs/evals](docs/evals); CI fails below 0.9 | ✅ 1.00 |
 | `localassist-bench` | p50–p99 latency, throughput, peak memory, fallback rate, cancellation timing; baselines in [docs/performance](docs/performance) | ✅ |

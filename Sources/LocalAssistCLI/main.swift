@@ -44,7 +44,7 @@ struct LocalAssistCommand {
     LocalAssist
 
     USAGE:
-      localassist --text "Send notes to Mira by Friday"
+      localassist --text "Call Mom tonight and pay the electricity bill by Friday"
       localassist --file ./meeting-notes.txt --plain
       cat notes.txt | localassist --fallback
 
