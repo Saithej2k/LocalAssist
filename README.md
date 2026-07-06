@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/branding/localassist-icon.png" width="120" alt="LocalAssist — a sleepy owl hugging a phone. Your thoughts never leave home.">
+
 # LocalAssist
 
 **Say it once. It becomes a plan — right on your phone.**

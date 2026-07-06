@@ -13,6 +13,7 @@
 		78BAF314095D16FE34C8A8A8 /* LocalAssistCore in Frameworks */ = {isa = PBXBuildFile; productRef = 42108E34E8F0B7008BE7CA0A /* LocalAssistCore */; };
 		8183F678E9F05A19A3A2D578 /* LocalAssistShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 100D19FDD93D7A4B36352C36 /* LocalAssistShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		BFC076489D64683D42671182 /* LocalAssistAppIntents in Frameworks */ = {isa = PBXBuildFile; productRef = 1D86B0D8943AC4A670A007A5 /* LocalAssistAppIntents */; };
+		D74C8C544761FB616FB4351C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 82FF1D7EC5282A4A756425EC /* Assets.xcassets */; };
 		D7803D24F14846782D1A0EBE /* LocalAssistCore in Frameworks */ = {isa = PBXBuildFile; productRef = D051C16E3E17EEED90957D50 /* LocalAssistCore */; };
 		DB4AE5303ECDAD349BF68A17 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D59F165A177F3C9014ED8AF4 /* ShareViewController.swift */; };
 		DF1BD8CA7BEEEEB342DD358D /* LocalAssistApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB96F71AF087606A91C81EB1 /* LocalAssistApp.swift */; };
@@ -57,6 +58,7 @@
 		530C6110899A20B711F3DE30 /* LocalAssistWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalAssistWidgets.swift; sourceTree = "<group>"; };
 		53DCCBE20696642DA66BD5DF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5ED7E8C53374413AB4397426 /* LocalAssist.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = LocalAssist.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		82FF1D7EC5282A4A756425EC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		8C836322D2AF4B6293385B30 /* LocalAssistWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LocalAssistWidgets.entitlements; sourceTree = "<group>"; };
 		C5C84973C77D20E0EE140564 /* build-this-end-to-end-and */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "build-this-end-to-end-and"; path = .; sourceTree = SOURCE_ROOT; };
 		D59F165A177F3C9014ED8AF4 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
@@ -135,6 +137,7 @@
 		CA733D0BC63BE407D0131627 /* LocalAssist */ = {
 			isa = PBXGroup;
 			children = (
+				82FF1D7EC5282A4A756425EC /* Assets.xcassets */,
 				EDC2D2D1366B5719213002B4 /* Info.plist */,
 				EBAD0D28D28E9A2E28B29154 /* LocalAssist.entitlements */,
 				DB96F71AF087606A91C81EB1 /* LocalAssistApp.swift */,
@@ -162,6 +165,7 @@
 			buildConfigurationList = 4671FDF30DBF8A8A3B405F81 /* Build configuration list for PBXNativeTarget "LocalAssist" */;
 			buildPhases = (
 				10357D2488D361BFFE03FCBA /* Sources */,
+				B365499F4AF10432E007F703 /* Resources */,
 				C444FFF63FA58CF2F0FA250D /* Frameworks */,
 				18FDBC9DE68A92D861604FB3 /* Embed Foundation Extensions */,
 			);
@@ -265,6 +269,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		B365499F4AF10432E007F703 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D74C8C544761FB616FB4351C /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		10357D2488D361BFFE03FCBA /* Sources */ = {
