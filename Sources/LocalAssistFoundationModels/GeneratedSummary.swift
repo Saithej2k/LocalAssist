@@ -99,29 +99,4 @@ extension DailyBrief {
         )
     }
 
-    /// One-shot example embedded in the session instructions. Because it
-    /// shows the optional task due date both populated and nil, it satisfies
-    /// the guided-generation contract on its own and the schema can be left
-    /// out of every prompt (`includeSchemaInPrompt: false`) — fewer input
-    /// tokens on the first turn, not just repeat turns.
-    static let instructionsExample = DailyBrief(
-        headline: "Family catch-up tonight, cake pickup Saturday, dentist still to book.",
-        keyPoints: [
-            "Mom is expecting a call tonight",
-            "The birthday cake is ready for pickup on Saturday",
-            "A dentist appointment still needs to be booked",
-        ],
-        tasks: [
-            BriefTaskSuggestion(
-                title: "Call Mom to check in",
-                priority: .high,
-                dueDate: "2026-07-10"
-            ),
-            BriefTaskSuggestion(
-                title: "Book a dentist appointment",
-                priority: .medium,
-                dueDate: nil
-            ),
-        ]
-    )
 }

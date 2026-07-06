@@ -48,7 +48,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_ENTITLEMENTS: Apps/iOS/LocalAssist/LocalAssist.entitlements
         MARKETING_VERSION: "1.1"
-        CURRENT_PROJECT_VERSION: "4"
+        CURRENT_PROJECT_VERSION: "5"
 
   LocalAssistWidgets:
     type: app-extension
@@ -67,7 +67,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_ENTITLEMENTS: Apps/iOS/LocalAssistWidgets/LocalAssistWidgets.entitlements
         MARKETING_VERSION: "1.1"
-        CURRENT_PROJECT_VERSION: "4"
+        CURRENT_PROJECT_VERSION: "5"
         SKIP_INSTALL: YES
 
   LocalAssistUITests:
@@ -99,7 +99,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_ENTITLEMENTS: Apps/iOS/LocalAssistShare/LocalAssistShare.entitlements
         MARKETING_VERSION: "1.1"
-        CURRENT_PROJECT_VERSION: "4"
+        CURRENT_PROJECT_VERSION: "5"
         SKIP_INSTALL: YES
 
 schemes:

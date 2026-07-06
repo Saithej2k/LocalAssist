@@ -54,7 +54,7 @@ The engine details that matter:
 | --- | --- |
 | Guided generation | `@Generable`/`@Guide` `DailyBrief` contract with `streamResponse(generating:)` — the framework's constrained decoding guarantees schema conformance, so there is no JSON-repair path anywhere in the app |
 | Typed streaming | `PartiallyGenerated` snapshots map to typed partials; the headline renders within the first tokens while tasks are still generating |
-| Session lifecycle | One `LanguageModelSession` reused across turns, prewarmed on demand, schema replaced by a full in-instructions example (`includeSchemaInPrompt: false` on every turn), overlapping requests isolated |
+| Session lifecycle | One `LanguageModelSession` reused across turns, prewarmed on demand, schema included on the first turn and dropped from repeats, overlapping requests isolated |
 | Context management | Rolling-window transcript compression (`ConversationMemory`); on projected or actual overflow the session is rebuilt with a condensed digest and retried |
 | Tool calling | `CalendarAvailabilityTool` reads real free/busy from EventKit so scheduling suggestions land in open slots; `ContactsLookupTool` resolves first names in notes to real contacts (both Foundation Models `Tool`s) |
 | Error taxonomy | Every `GenerationError` and `UnavailableReason` maps to a typed `GenerationFailure`; the deterministic fallback keeps every capture producing a brief, with the exact reason preserved in diagnostics |

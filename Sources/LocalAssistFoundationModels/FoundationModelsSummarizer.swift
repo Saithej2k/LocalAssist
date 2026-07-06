@@ -11,10 +11,12 @@ import OSLog
 /// - **Guided generation**: `streamResponse(generating: DailyBrief.self)`
 ///   uses constrained decoding — schema conformance is guaranteed, so there is
 ///   no malformed-output repair path.
-/// - **Schema token savings**: the session instructions carry a full
-///   `DailyBrief` example (optional due date shown populated and nil), so the
-///   schema is omitted from every prompt — the WWDC "example instead of
-///   schema" optimization, applied to the first turn as well as repeats.
+/// - **Schema token savings**: the schema rides in the first prompt of a
+///   session and is dropped from repeats (the transcript already carries
+///   it). A content example in the instructions was tried instead and
+///   reverted: the on-device model copied the example's tasks into real
+///   briefs whenever a note resembled it. Structure must come from the
+///   schema, which has nothing to leak.
 /// - **Context-window management**: compressed exchanges are recorded in
 ///   `ConversationMemory`; on (projected or actual) transcript overflow the
 ///   session is rebuilt with a condensed digest and the request is retried once.
@@ -127,13 +129,11 @@ public actor FoundationModelsSummarizer: StructuredModelClient {
         do {
             try Task.checkCancellation()
 
-            // The demarcated instructions example stands in for the schema
-            // on every turn; A/B against schema-in-prompt showed the schema
-            // variant padding output with fabricated filler tasks.
+            let includeSchema = !usesSharedSession || completedTurnsInSession == 0
             let stream = session.streamResponse(
                 to: prompt,
                 generating: DailyBrief.self,
-                includeSchemaInPrompt: false,
+                includeSchemaInPrompt: includeSchema,
                 options: GenerationOptions()
             )
 
@@ -203,15 +203,13 @@ public actor FoundationModelsSummarizer: StructuredModelClient {
         estimatedTranscriptCharacters = condensed?.count ?? 0
     }
 
+    // No content example in the instructions, deliberately: the on-device
+    // model copied a "fictional, never repeat" example's tasks into real
+    // briefs whenever a note resembled it. Structure comes from the schema
+    // on the first turn — field names can't leak into content.
     private func makeSession(condensedContext: String?) -> LanguageModelSession {
         LanguageModelSession(model: model, tools: tools) {
             Self.baseInstructions
-            """
-            The following is a FORMAT example only. Its people, tasks, and dates are fictional — \
-            never repeat any of them in your responses. Only the structure and level of detail apply:
-            """
-            DailyBrief.instructionsExample
-            "End of format example. Every headline, key point, and task you produce must come from the user's note alone."
             if let condensedContext {
                 condensedContext
             }
