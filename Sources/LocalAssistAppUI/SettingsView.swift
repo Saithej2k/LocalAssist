@@ -80,6 +80,12 @@ struct SettingsFormView: View {
             } footer: {
                 Text("History lives in a private JSON file in the app's container.")
             }
+
+            Section {
+            } footer: {
+                Text("LocalAssist \(Self.versionString) — everything on this device.")
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
         }
         .onAppear {
             refreshExports()
@@ -93,6 +99,12 @@ struct SettingsFormView: View {
         let exports = viewModel.exportFileURLs()
         markdownExportURL = exports.markdown
         jsonExportURL = exports.json
+    }
+
+    static var versionString: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
+        return "v\(version) (\(build))"
     }
 
     private var smartModeBinding: Binding<Bool> {

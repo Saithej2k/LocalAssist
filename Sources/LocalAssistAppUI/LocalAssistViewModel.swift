@@ -1,5 +1,6 @@
 import Foundation
 import LocalAssistCore
+import OSLog
 import LocalAssistFoundationModels
 import LocalAssistSystemTools
 
@@ -132,6 +133,8 @@ public final class LocalAssistViewModel: ObservableObject {
     /// App Shortcut, Lock Screen widget).
     public func prepareVoiceCapture() {
         voiceCaptureBaseText = inputText
+        Logger(subsystem: "com.saithej.localassist", category: "Voice")
+            .info("prepare capture: base=\(self.voiceCaptureBaseText.count) chars")
     }
 
     /// Live transcript updates merge onto the snapshot; the box never loses

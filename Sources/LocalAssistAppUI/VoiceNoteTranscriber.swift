@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import OSLog
 
 #if os(iOS) && canImport(AVFoundation) && canImport(Speech)
     import AVFoundation
@@ -22,6 +23,9 @@ public enum VoiceCaptureState: Equatable {
 #if os(iOS) && canImport(AVFoundation) && canImport(Speech)
     @MainActor
     public final class VoiceNoteTranscriber: ObservableObject {
+        /// Lengths and codes only — transcripts never reach the log.
+        private static let log = Logger(subsystem: "com.saithej.localassist", category: "Voice")
+
         @Published public private(set) var state: VoiceCaptureState = .idle
         @Published public private(set) var transcript = ""
         @Published public private(set) var errorMessage: String?
@@ -86,6 +90,7 @@ public enum VoiceCaptureState: Equatable {
             if !accumulator.transcript.isEmpty {
                 transcript = accumulator.transcript
             }
+            Self.log.info("stop: transcript=\(self.transcript.count) chars, gen=\(self.segmentGeneration)")
             stopAudio(cancelRecognition: true)
             state = .idle
         }
@@ -176,6 +181,7 @@ public enum VoiceCaptureState: Equatable {
         private func beginRecognitionSegment(recognizer: SFSpeechRecognizer) {
             segmentGeneration += 1
             let generation = segmentGeneration
+            Self.log.info("segment begin: gen=\(generation), folded=\(self.accumulator.finalizedText.count) chars")
 
             let request = SFSpeechAudioBufferRecognitionRequest()
             request.shouldReportPartialResults = true
@@ -214,6 +220,7 @@ public enum VoiceCaptureState: Equatable {
             // Callbacks from a superseded segment (late finals, cancel
             // errors) must not touch the transcript or spawn restarts.
             guard isRecording, generation == segmentGeneration else {
+                Self.log.info("dropped stale callback: gen=\(generation) vs \(self.segmentGeneration), recording=\(self.isRecording)")
                 return
             }
 
@@ -221,6 +228,7 @@ public enum VoiceCaptureState: Equatable {
                 errorRestartCount = 0
                 if isFinal {
                     accumulator.finalizeSegment(latest)
+                    Self.log.info("final: gen=\(generation), segment=\(latest.count) chars, total=\(self.accumulator.transcript.count)")
                 } else {
                     accumulator.updatePartial(latest)
                 }
@@ -237,6 +245,7 @@ public enum VoiceCaptureState: Equatable {
                 // nothing folded the live partial — fold it here, or the
                 // next segment would overwrite everything already said.
                 let heardNothing = accumulator.currentSegment.isEmpty && latest == nil
+                Self.log.info("segment error end: gen=\(generation), code=\(errorCode ?? 0), folding=\(self.accumulator.currentSegment.count) chars, total=\(self.accumulator.transcript.count)")
                 accumulator.endSegmentWithoutFinal()
                 if !accumulator.transcript.isEmpty {
                     transcript = accumulator.transcript
