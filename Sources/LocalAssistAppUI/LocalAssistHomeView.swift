@@ -7,9 +7,19 @@ import SwiftUI
     import AppKit
 #endif
 
+/// Top-level navigation: one tab per job. Capture stays a short, focused
+/// screen; reviewing today's tasks and browsing history live on their own
+/// tabs instead of stacking into one long scroll.
+private enum AppTab: Hashable {
+    case capture
+    case today
+    case history
+}
+
 public struct LocalAssistHomeView: View {
     @StateObject private var viewModel: LocalAssistViewModel
     @StateObject private var voiceTranscriber = VoiceNoteTranscriber()
+    @State private var selectedTab: AppTab = .capture
     @State private var didRunLaunchAutomation = false
     @State private var showsSettings = false
     @State private var showsScanner = false
@@ -23,10 +33,73 @@ public struct LocalAssistHomeView: View {
     }
 
     public var body: some View {
+        TabView(selection: $selectedTab) {
+            captureTab
+                .tabItem {
+                    Label("Capture", systemImage: "mic.fill")
+                }
+                .tag(AppTab.capture)
+
+            todayTab
+                .tabItem {
+                    Label("Today", systemImage: "sun.max.fill")
+                }
+                .tag(AppTab.today)
+                .badge(openDueTodayCount)
+
+            historyTab
+                .tabItem {
+                    Label("History", systemImage: "clock.arrow.circlepath")
+                }
+                .tag(AppTab.history)
+        }
+        .task {
+            viewModel.prewarm()
+            viewModel.refreshAvailability()
+            viewModel.loadHistory()
+            runLaunchAutomationIfNeeded()
+            if !hasOnboarded, ProcessInfo.processInfo.environment["LOCALASSIST_AUTO_RUN"] != "1" {
+                showsOnboarding = true
+            }
+        }
+        // Prewarm the on-device model the moment the user starts typing —
+        // the WWDC "strong hint" heuristic. In Instant mode this is a no-op.
+        .onChange(of: viewModel.inputText) { _, _ in
+            viewModel.inputChanged()
+        }
+        .sheet(isPresented: $showsOnboarding, onDismiss: { hasOnboarded = true }) {
+            OnboardingView {
+                showsOnboarding = false
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .localAssistCaptureRequested)) { _ in
+            selectedTab = .capture
+            startExternalCapture()
+        }
+        .onOpenURL { url in
+            if url.host == "capture" || url.path.contains("capture") {
+                selectedTab = .capture
+                startExternalCapture()
+            } else if url.host == "today" || url.path.contains("today") {
+                selectedTab = .today
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else {
+                return
+            }
+            drainSharedCaptureIfNeeded()
+            viewModel.loadHistory()
+        }
+    }
+
+    // MARK: - Tabs
+
+    private var captureTab: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    AppHeaderView(
+                    ModelModePill(
                         usesSmartModel: viewModel.usesSmartModel,
                         availability: viewModel.availability,
                         onToggle: { viewModel.toggleSmartMode() }
@@ -72,7 +145,46 @@ public struct LocalAssistHomeView: View {
                             RefineBarView(viewModel: viewModel)
                         }
                     }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 18)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .background(LocalAssistColors.canvas)
+            // Native large title instead of a second in-content header —
+            // one "local assist", the system way.
+            .navigationTitle("local assist")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showsSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .accessibilityLabel("Settings")
+                }
+            }
+            .sheet(isPresented: $showsSettings) {
+                SettingsSheetView(viewModel: viewModel)
+            }
+            .sheet(isPresented: $showsScanner) {
+                ScanCaptureSheet { text in
+                    guard !text.isEmpty else {
+                        return
+                    }
+                    viewModel.inputKind = .note
+                    viewModel.inputText = viewModel.inputText.isEmpty
+                        ? text
+                        : viewModel.inputText + "\n" + text
+                }
+            }
+        }
+    }
 
+    private var todayTab: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
                     TodayView(
                         currentRun: viewModel.run,
                         history: viewModel.history,
@@ -80,8 +192,27 @@ public struct LocalAssistHomeView: View {
                             viewModel.toggleTask(runID: runID, task: task)
                         }
                     )
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 18)
+            }
+            .background(LocalAssistColors.canvas)
+            .navigationTitle("Today")
+        }
+    }
 
-                    if !viewModel.history.isEmpty {
+    private var historyTab: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    if viewModel.history.isEmpty {
+                        StatusPanel(
+                            symbol: "clock.arrow.circlepath",
+                            title: "No briefs yet",
+                            message: "Captured briefs land here so you can search and revisit them.",
+                            tint: .secondary
+                        )
+                    } else {
                         RunHistoryView(runs: viewModel.history)
                     }
                 }
@@ -89,69 +220,21 @@ public struct LocalAssistHomeView: View {
                 .padding(.vertical, 18)
             }
             .background(LocalAssistColors.canvas)
-            .navigationTitle("local assist")
-            #if os(iOS)
-                .navigationBarTitleDisplayMode(.inline)
-            #endif
-                .toolbar {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            showsSettings = true
-                        } label: {
-                            Image(systemName: "gearshape")
-                        }
-                        .accessibilityLabel("Settings")
-                    }
+            .navigationTitle("History")
+        }
+    }
+
+    /// Open tasks due today across all runs — surfaces as the Today badge.
+    private var openDueTodayCount: Int {
+        var count = 0
+        for run in viewModel.history {
+            for task in run.summary.tasks where !run.isCompleted(task) {
+                if let due = task.dueDate, Calendar.current.isDateInToday(due) {
+                    count += 1
                 }
-                .sheet(isPresented: $showsSettings) {
-                    SettingsSheetView(viewModel: viewModel)
-                }
-                .sheet(isPresented: $showsScanner) {
-                    ScanCaptureSheet { text in
-                        guard !text.isEmpty else {
-                            return
-                        }
-                        viewModel.inputKind = .note
-                        viewModel.inputText = viewModel.inputText.isEmpty
-                            ? text
-                            : viewModel.inputText + "\n" + text
-                    }
-                }
-        }
-        .task {
-            viewModel.prewarm()
-            viewModel.refreshAvailability()
-            viewModel.loadHistory()
-            runLaunchAutomationIfNeeded()
-            if !hasOnboarded, ProcessInfo.processInfo.environment["LOCALASSIST_AUTO_RUN"] != "1" {
-                showsOnboarding = true
             }
         }
-        // Prewarm the on-device model the moment the user starts typing —
-        // the WWDC "strong hint" heuristic. In Instant mode this is a no-op.
-        .onChange(of: viewModel.inputText) { _, _ in
-            viewModel.inputChanged()
-        }
-        .sheet(isPresented: $showsOnboarding, onDismiss: { hasOnboarded = true }) {
-            OnboardingView {
-                showsOnboarding = false
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .localAssistCaptureRequested)) { _ in
-            startExternalCapture()
-        }
-        .onOpenURL { url in
-            if url.host == "capture" || url.path.contains("capture") {
-                startExternalCapture()
-            }
-        }
-        .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else {
-                return
-            }
-            drainSharedCaptureIfNeeded()
-            viewModel.loadHistory()
-        }
+        return count
     }
 
     /// Picks up text captured via the share extension while the app was away.
@@ -214,36 +297,6 @@ extension LocalAssistHomeView {
             viewModel.forceOfflineFallbackForAutomation()
         }
         viewModel.summarize()
-    }
-}
-
-private struct AppHeaderView: View {
-    var usesSmartModel: Bool
-    var availability: ModelAvailability?
-    var onToggle: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("local assist")
-                        .font(.system(.largeTitle, design: .rounded, weight: .bold))
-                        .lineLimit(2)
-                    Text("Say it once. It becomes a plan — right on this phone.")
-                        .font(.system(.body, design: .rounded))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 12)
-            }
-
-            ModelModePill(
-                usesSmartModel: usesSmartModel,
-                availability: availability,
-                onToggle: onToggle
-            )
-        }
     }
 }
 
@@ -462,6 +515,7 @@ private struct InputComposerView: View {
     @ObservedObject var viewModel: LocalAssistViewModel
     @ObservedObject var voiceTranscriber: VoiceNoteTranscriber
     var onScan: () -> Void
+    @FocusState private var editorFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -534,6 +588,18 @@ private struct InputComposerView: View {
                     .frame(minHeight: 158)
                     .padding(12)
                     .scrollContentBackground(.hidden)
+                    .focused($editorFocused)
+                    // The system "Done" affordance: TextEditor has no return
+                    // key to dismiss with, so give the keyboard a toolbar.
+                    .toolbar {
+                        ToolbarItemGroup(placement: .keyboard) {
+                            Spacer()
+                            Button("Done") {
+                                editorFocused = false
+                            }
+                            .font(.system(.body, design: .rounded, weight: .semibold))
+                        }
+                    }
 
                 if viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text(viewModel.inputKind.placeholder)
@@ -549,6 +615,21 @@ private struct InputComposerView: View {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .stroke(LocalAssistColors.border)
             }
+            // One-tap clear, right where the text is — not buried in Settings.
+            .overlay(alignment: .topTrailing) {
+                if !viewModel.inputText.isEmpty {
+                    Button {
+                        viewModel.inputText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 18))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(10)
+                    .accessibilityLabel("Clear text")
+                }
+            }
 
             if voiceTranscriber.isRecording || voiceTranscriber.state == .requestingPermission || !voiceTranscriber.transcript.isEmpty || voiceTranscriber.errorMessage != nil {
                 CompactVoiceStatusView(transcriber: voiceTranscriber)
@@ -556,6 +637,7 @@ private struct InputComposerView: View {
 
             HStack(spacing: 10) {
                 Button {
+                    editorFocused = false
                     viewModel.summarize()
                 } label: {
                     Label(viewModel.isGenerating ? "Working" : "Review Actions", systemImage: "checklist.checked")
