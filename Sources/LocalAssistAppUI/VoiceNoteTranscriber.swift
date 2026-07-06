@@ -133,23 +133,24 @@ public enum VoiceCaptureState: Equatable {
         private func startAudioRecognition(localeIdentifier: String) async throws {
             stopAudio(cancelRecognition: true)
 
-            let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeIdentifier))
-            guard let recognizer else {
-                throw VoiceCaptureError.recognizerUnavailable
-            }
-            guard recognizer.isAvailable else {
-                throw VoiceCaptureError.recognizerUnavailable
-            }
-            guard recognizer.supportsOnDeviceRecognition else {
-                throw VoiceCaptureError.onDeviceRecognitionUnavailable
-            }
-
-            // Session activation and engine startup block for hundreds of
-            // milliseconds — off the main thread (this was the mic-tap
-            // hang the hang detector flagged). The tap closure is
+            // Everything blocking happens off the main thread: recognizer
+            // asset checks, audio-session activation, and engine startup
+            // each stall for hundreds of milliseconds and together were the
+            // mic-tap hang the hang detector flagged. The tap closure is
             // @Sendable and captures only the relay.
             let relay = requestRelay
-            let engineBox = try await Task.detached(priority: .userInitiated) { () -> UncheckedSendable<AVAudioEngine> in
+            let box = try await Task.detached(priority: .userInitiated) { () -> UncheckedSendable<(SFSpeechRecognizer, AVAudioEngine)> in
+                let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeIdentifier))
+                guard let recognizer else {
+                    throw VoiceCaptureError.recognizerUnavailable
+                }
+                guard recognizer.isAvailable else {
+                    throw VoiceCaptureError.recognizerUnavailable
+                }
+                guard recognizer.supportsOnDeviceRecognition else {
+                    throw VoiceCaptureError.onDeviceRecognitionUnavailable
+                }
+
                 let audioSession = AVAudioSession.sharedInstance()
                 try audioSession.setCategory(.record, mode: .measurement, options: [.duckOthers])
                 try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
@@ -168,12 +169,12 @@ public enum VoiceCaptureState: Equatable {
 
                 engine.prepare()
                 try engine.start()
-                return UncheckedSendable(value: engine)
+                return UncheckedSendable(value: (recognizer, engine))
             }.value
 
-            speechRecognizer = recognizer
-            audioEngine = engineBox.value
-            beginRecognitionSegment(recognizer: recognizer)
+            speechRecognizer = box.value.0
+            audioEngine = box.value.1
+            beginRecognitionSegment(recognizer: box.value.0)
         }
 
         /// One recognition request per utterance segment: the recognizer
@@ -238,7 +239,11 @@ public enum VoiceCaptureState: Equatable {
                     }
                     Self.log.info("final: gen=\(generation) (live=\(isCurrentSegment)), segment=\(latest.count) chars, total=\(self.accumulator.transcript.count)")
                 } else if isCurrentSegment {
+                    let foldedBefore = accumulator.finalizedText.count
                     accumulator.updatePartial(latest)
+                    if accumulator.finalizedText.count > foldedBefore {
+                        Self.log.info("hypothesis reset folded: gen=\(generation), folded=\(self.accumulator.finalizedText.count) chars")
+                    }
                 }
                 transcript = accumulator.transcript
             }

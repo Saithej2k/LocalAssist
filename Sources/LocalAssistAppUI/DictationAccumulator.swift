@@ -30,7 +30,20 @@ public struct DictationAccumulator: Equatable, Sendable {
 
     /// A revised partial hypothesis for the current segment. Partials may
     /// shrink as the recognizer corrects itself; finalized text never does.
+    ///
+    /// The on-device recognizer can also reset its hypothesis to a fresh
+    /// utterance after a pause without ever sending a final or an error —
+    /// the new phrase simply starts overwriting the old one. A reset shows
+    /// up as a shorter partial that is not a prefix-revision of the current
+    /// text (new utterances stream word by word, so their first partial is
+    /// short). Fold the old words before accepting it, or every pause
+    /// would erase everything said before it.
     public mutating func updatePartial(_ text: String) {
+        let new = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let old = currentSegment.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !old.isEmpty, !new.isEmpty, new.count < old.count, !old.hasPrefix(new) {
+            fold(currentSegment)
+        }
         currentSegment = text
     }
 

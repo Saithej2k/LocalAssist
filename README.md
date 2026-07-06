@@ -77,7 +77,7 @@ The engine details that matter:
 # Full Xcode toolchain required: plain CommandLineTools builds but silently skips XCTest.
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 
-swift test                              # 49 tests
+swift test                              # 50 tests
 swift run localassist-selftest          # 47 end-to-end checks
 swift run localassist-eval --min-score 0.9
 swift run localassist --text "Call Mom tonight, pick up the birthday cake Saturday, and book the dentist for next week." --plain
@@ -96,7 +96,7 @@ Verification is deterministic and CI-gated — no LLM judges, no flaky assertion
 
 | Check | What it covers | Status |
 | --- | --- | --- |
-| `swift test` (49) | Fallback policy, error taxonomy, typed streaming order, map-reduce chunking, task completion persistence, cancellation, concurrency, due-date parsing, local-day due-date policy, capture-kind inference, tool calls, executor writes, conversation memory, legacy decode, eval scorers | ✅ |
+| `swift test` (50) | Fallback policy, error taxonomy, typed streaming order, map-reduce chunking, task completion persistence, cancellation, concurrency, due-date parsing, local-day due-date policy, capture-kind inference, tool calls, executor writes, conversation memory, legacy decode, eval scorers | ✅ |
 | `localassist-selftest` (47) | End-to-end scenario checks runnable on any machine | ✅ |
 | `localassist-eval` | Task recall, due-date accuracy, action mapping, structure compliance, hallucination probes over a fixed dataset; dated reports in [docs/evals](docs/evals); CI fails below 0.9 | ✅ 1.00 |
 | `localassist-bench` | p50–p99 latency, throughput, peak memory, fallback rate, cancellation timing; baselines in [docs/performance](docs/performance) | ✅ |

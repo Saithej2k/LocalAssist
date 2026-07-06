@@ -151,6 +151,41 @@ final class LocalAssistCaptureBehaviorTests: XCTestCase {
         XCTAssertTrue(dictation.transcript.hasSuffix("text Priya about brunch"))
     }
 
+    func testDictationSurvivesHypothesisResetsWithoutFinalsOrErrors() {
+        // The exact pattern from the 2026-07-06 screen recording on device:
+        // one recognition runs the whole time, never sending finals or
+        // errors — after each pause its partial hypothesis resets and the
+        // next phrase starts overwriting the previous one. New utterances
+        // stream word by word, so their first partial is short.
+        var dictation = DictationAccumulator()
+
+        dictation.updatePartial("Call")
+        dictation.updatePartial("Call mom")
+        dictation.updatePartial("Call mom tonight")
+
+        // Pause. Hypothesis resets; the next phrase arrives incrementally.
+        dictation.updatePartial("And")
+        XCTAssertEqual(dictation.finalizedText, "Call mom tonight")
+        dictation.updatePartial("And grab the birthday")
+        dictation.updatePartial("And grab the birthday cake Saturday")
+        XCTAssertEqual(dictation.transcript, "Call mom tonight And grab the birthday cake Saturday")
+
+        // Second pause, third phrase.
+        dictation.updatePartial("And also")
+        dictation.updatePartial("And also text Priya")
+        XCTAssertEqual(
+            dictation.transcript,
+            "Call mom tonight And grab the birthday cake Saturday And also text Priya"
+        )
+
+        // In-utterance revisions that shrink but remain prefixes must NOT fold.
+        var revising = DictationAccumulator()
+        revising.updatePartial("Call mommy")
+        revising.updatePartial("Call mom")
+        XCTAssertEqual(revising.finalizedText, "")
+        XCTAssertEqual(revising.transcript, "Call mom")
+    }
+
     func testDictationFoldsLateFinalsFromSupersededSegments() {
         // The on-device recognizer can withhold partials entirely and send
         // the pause error BEFORE the utterance's final text. That late
