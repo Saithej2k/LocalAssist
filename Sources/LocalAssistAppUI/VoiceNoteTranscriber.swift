@@ -84,17 +84,21 @@ public enum VoiceCaptureState: Equatable {
             }
         }
 
-        private func speechAuthorizationStatus() async -> SFSpeechRecognizerAuthorizationStatus {
+        // Permission callbacks arrive on a background TCC queue. These
+        // helpers are nonisolated with @Sendable callbacks so the closures
+        // carry no MainActor isolation — otherwise the Swift runtime traps
+        // with dispatch_assert_queue_fail the moment TCC replies.
+        private nonisolated func speechAuthorizationStatus() async -> SFSpeechRecognizerAuthorizationStatus {
             await withCheckedContinuation { continuation in
-                SFSpeechRecognizer.requestAuthorization { status in
+                SFSpeechRecognizer.requestAuthorization { @Sendable status in
                     continuation.resume(returning: status)
                 }
             }
         }
 
-        private func microphoneAccessGranted() async -> Bool {
+        private nonisolated func microphoneAccessGranted() async -> Bool {
             await withCheckedContinuation { continuation in
-                AVAudioSession.sharedInstance().requestRecordPermission { allowed in
+                AVAudioSession.sharedInstance().requestRecordPermission { @Sendable allowed in
                     continuation.resume(returning: allowed)
                 }
             }
@@ -136,23 +140,31 @@ public enum VoiceCaptureState: Equatable {
             speechRecognizer = recognizer
             audioEngine = engine
             recognitionRequest = request
-            recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            // Recognition results also arrive off-main; the handler must be
+            // @Sendable, with all state mutation hopping to the MainActor.
+            recognitionTask = recognizer.recognitionTask(with: request) { @Sendable [weak self] result, error in
+                // Pull Sendable values out before hopping actors — the raw
+                // SFSpeechRecognitionResult must not cross the boundary.
+                let latestTranscript = result?.bestTranscription.formattedString
+                let isFinal = result?.isFinal ?? false
+                let failureMessage = error?.localizedDescription
+
                 Task { @MainActor [weak self] in
                     guard let self else {
                         return
                     }
 
-                    if let result {
-                        transcript = result.bestTranscription.formattedString
-                        if result.isFinal {
+                    if let latestTranscript {
+                        transcript = latestTranscript
+                        if isFinal {
                             stop()
                         }
                     }
 
-                    if let error, isRecording {
+                    if let failureMessage, isRecording {
                         stopAudio(cancelRecognition: true)
-                        errorMessage = error.localizedDescription
-                        state = .unavailable(error.localizedDescription)
+                        errorMessage = failureMessage
+                        state = .unavailable(failureMessage)
                     }
                 }
             }
