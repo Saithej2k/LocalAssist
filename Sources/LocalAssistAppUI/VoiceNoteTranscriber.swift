@@ -130,7 +130,11 @@ public enum VoiceCaptureState: Equatable {
             let engine = AVAudioEngine()
             let inputNode = engine.inputNode
             let recordingFormat = inputNode.outputFormat(forBus: 0)
-            inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak request] buffer, _ in
+            // The audio tap fires on a realtime audio thread. Without
+            // @Sendable the closure inherits MainActor isolation from this
+            // class and Swift 6 traps in dispatch_assert_queue_fail the
+            // instant a buffer arrives.
+            inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { @Sendable [weak request] buffer, _ in
                 request?.append(buffer)
             }
 

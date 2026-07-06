@@ -40,24 +40,15 @@ public actor RunHistoryStore {
     /// read the same history. Falls back to Application Support when the
     /// group container is unavailable (tests, CLI, unsigned builds), with a
     /// one-time migration of legacy history into the shared container.
+    ///
+    /// The app-group container lookup is an XPC call into containermanagerd
+    /// that takes ~1 second to time out on unsigned/unprovisioned builds.
+    /// The result is cached so we pay that cost at most once per process.
     public static func sharedOrLocal(limit: Int = 50) -> RunHistoryStore? {
-        guard let container = FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: appGroupIdentifier
-        ) else {
-            return applicationSupportOrNil(limit: limit)
+        if let cachedURL = SharedContainerCache.resolvedFileURL() {
+            return RunHistoryStore(fileURL: cachedURL, limit: limit)
         }
-
-        let directory = container.appendingPathComponent("LocalAssist", isDirectory: true)
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let fileURL = directory.appendingPathComponent("run-history.json")
-
-        if !FileManager.default.fileExists(atPath: fileURL.path),
-           let legacy = applicationSupportOrNil(limit: limit),
-           FileManager.default.fileExists(atPath: legacy.fileURL.path) {
-            try? FileManager.default.copyItem(at: legacy.fileURL, to: fileURL)
-        }
-
-        return RunHistoryStore(fileURL: fileURL, limit: limit)
+        return applicationSupportOrNil(limit: limit)
     }
 
     public func load() throws -> [AssistantRun] {
