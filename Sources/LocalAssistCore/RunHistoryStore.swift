@@ -36,6 +36,14 @@ public actor RunHistoryStore {
     /// App-group identifier shared with the widget and share extensions.
     public static let appGroupIdentifier = "group.com.saithej.localassist"
 
+    /// Whether the app-group container is actually provisioned for this
+    /// build. Free personal teams often fail to provision the group;
+    /// callers use this to skip group-scoped APIs that would otherwise
+    /// log cfprefsd complaints and silently no-op.
+    public static var isSharedContainerAvailable: Bool {
+        SharedContainerCache.resolvedFileURL() != nil
+    }
+
     /// Preferred store: the app-group container so widgets and extensions can
     /// read the same history. Falls back to Application Support when the
     /// group container is unavailable (tests, CLI, unsigned builds), with a

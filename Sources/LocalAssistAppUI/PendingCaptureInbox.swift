@@ -12,7 +12,11 @@ public enum PendingCaptureInbox {
     public static let key = "localassist.pendingCaptureText"
 
     public static func drain() -> String? {
-        guard let defaults = UserDefaults(suiteName: RunHistoryStore.appGroupIdentifier),
+        // Without a provisioned app group (free personal teams) the suite
+        // is unusable and merely asking for it logs a cfprefsd complaint
+        // on every foreground — skip straight out.
+        guard RunHistoryStore.isSharedContainerAvailable,
+              let defaults = UserDefaults(suiteName: RunHistoryStore.appGroupIdentifier),
               let text = defaults.string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines),
               !text.isEmpty
         else {

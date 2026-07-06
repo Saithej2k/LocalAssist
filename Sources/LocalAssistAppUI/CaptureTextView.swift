@@ -18,10 +18,15 @@
         @Binding var scanRequestCount: Int
 
         /// The system scan flow needs a camera; hide the affordance in the
-        /// simulator and on devices without one.
-        static var supportsCameraScan: Bool {
-            AVCaptureDevice.default(for: .video) != nil
-        }
+        /// simulator and on devices without one. Resolved once — probing
+        /// AVCaptureDevice per body evaluation spams CoreMedia (Fig) logs,
+        /// and even a single probe logs on the camera-less simulator, so
+        /// that case is decided at compile time.
+        #if targetEnvironment(simulator)
+            static let supportsCameraScan = false
+        #else
+            static let supportsCameraScan: Bool = AVCaptureDevice.default(for: .video) != nil
+        #endif
 
         func makeCoordinator() -> Coordinator {
             Coordinator(self)
@@ -102,14 +107,28 @@
 
             /// Keyboard "Done" bar — TextEditor-style views have no return
             /// key that dismisses, so the accessory carries the affordance.
-            func makeAccessoryToolbar() -> UIToolbar {
-                let toolbar = UIToolbar(frame: CGRect(x: 0, y: 0, width: 320, height: 44))
-                toolbar.items = [
-                    UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil),
-                    UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(dismissKeyboard)),
-                ]
-                toolbar.sizeToFit()
-                return toolbar
+            /// Built on UIInputView with a plain button: UIToolbar +
+            /// UIBarButtonItem in an inputAccessoryView throws spurious
+            /// unsatisfiable-constraint warnings (`ButtonWrapper.width == 0`)
+            /// on first keyboard presentation.
+            func makeAccessoryToolbar() -> UIView {
+                let accessory = UIInputView(
+                    frame: CGRect(x: 0, y: 0, width: 0, height: 44),
+                    inputViewStyle: .keyboard
+                )
+
+                let done = UIButton(type: .system)
+                done.setTitle("Done", for: .normal)
+                done.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
+                done.addTarget(self, action: #selector(dismissKeyboard), for: .touchUpInside)
+                done.translatesAutoresizingMaskIntoConstraints = false
+
+                accessory.addSubview(done)
+                NSLayoutConstraint.activate([
+                    done.trailingAnchor.constraint(equalTo: accessory.trailingAnchor, constant: -16),
+                    done.centerYAnchor.constraint(equalTo: accessory.centerYAnchor),
+                ])
+                return accessory
             }
 
             @objc private func dismissKeyboard() {
