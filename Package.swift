@@ -7,6 +7,7 @@ let developerLibraries = "/Library/Developer/CommandLineTools/Library/Developer/
 
 let package = Package(
     name: "LocalAssist",
+    defaultLocalization: "en",
     platforms: [
         .iOS(.v26),
         .macOS(.v26)

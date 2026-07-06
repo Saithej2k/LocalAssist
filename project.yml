@@ -42,6 +42,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.saithej.localassist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_EMIT_LOC_STRINGS: YES
         INFOPLIST_FILE: Apps/iOS/LocalAssist/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_STYLE: Automatic
@@ -69,6 +70,21 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         SKIP_INSTALL: YES
 
+  LocalAssistUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: Apps/iOS/LocalAssistUITests
+    dependencies:
+      - target: LocalAssist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.saithej.localassist.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: LocalAssist
+        CODE_SIGN_STYLE: Automatic
+
   LocalAssistShare:
     type: app-extension
     platform: iOS
@@ -95,3 +111,5 @@ schemes:
       config: Debug
     test:
       config: Debug
+      targets:
+        - LocalAssistUITests

@@ -206,7 +206,10 @@ public actor FoundationModelsSummarizer: StructuredModelClient {
     private func makeSession(condensedContext: String?) -> LanguageModelSession {
         LanguageModelSession(model: model, tools: tools) {
             Self.baseInstructions
-            "The following is a FORMAT example only. Its people, tasks, and dates are fictional — never repeat any of them in your responses. Only the structure and level of detail apply:"
+            """
+            The following is a FORMAT example only. Its people, tasks, and dates are fictional — \
+            never repeat any of them in your responses. Only the structure and level of detail apply:
+            """
             DailyBrief.instructionsExample
             "End of format example. Every headline, key point, and task you produce must come from the user's note alone."
             if let condensedContext {
@@ -221,7 +224,8 @@ public actor FoundationModelsSummarizer: StructuredModelClient {
     private static let baseInstructions: String = """
     You are LocalAssist, a private on-device task assistant.
     You turn the user's raw notes into a structured summary with actionable follow-up tasks.
-    Only use information found in the user's text or returned by your tools; never invent people, dates, or commitments — extract only tasks the note actually states.
+    Only use information found in the user's text or returned by your tools; \
+    never invent people, dates, or commitments — extract only tasks the note actually states.
     When a task has a stated or implied deadline, resolve it to an ISO-8601 calendar date; leave the due date nil otherwise.
     Day names like "Saturday" mean the next upcoming Saturday, never a past date; only "today" or "tonight" mean today's date.
     When a tool is available to check calendar availability or resolve a contact, prefer calling it over guessing.
@@ -240,7 +244,8 @@ public actor FoundationModelsSummarizer: StructuredModelClient {
             """
         }
         return """
-        Today is \(today). Summarize the following \(request.inputKind.promptLabel) and extract at most \(request.maxSuggestions) follow-up tasks.
+        Today is \(today). Summarize the following \(request.inputKind.promptLabel) \
+        and extract at most \(request.maxSuggestions) follow-up tasks.
         Capture guidance: \(request.inputKind.promptGuidance)
 
         Source:
@@ -315,9 +320,15 @@ private extension AssistantInputKind {
     var promptGuidance: String {
         switch self {
         case .note:
-            "First infer what kind of capture this is — scattered notes, a meeting recap, errands, or ideas — then create a concise recap, key points, tasks, and safe action drafts to match."
+            """
+            First infer what kind of capture this is — scattered notes, a meeting recap, errands, \
+            or ideas — then create a concise recap, key points, tasks, and safe action drafts to match.
+            """
         case .voiceNote:
-            "Clean up natural speech, ignore filler words and false starts, preserve intent, and turn commitments into tasks, reminders, calendar candidates, and message drafts."
+            """
+            Clean up natural speech, ignore filler words and false starts, preserve intent, \
+            and turn commitments into tasks, reminders, calendar candidates, and message drafts.
+            """
         case .meeting:
             "Prioritize decisions, owners, deadlines, follow-ups, unresolved questions, and calendar-worthy next meetings."
         case .personalAdmin:

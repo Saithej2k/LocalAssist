@@ -8,16 +8,21 @@
 
 /* Begin PBXBuildFile section */
 		24D3489A13F3042166EA419B /* LocalAssistWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E5F9BBCA987616D5B771010B /* LocalAssistWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		2AD9039E45D86A91579D9391 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = C8F310D757D393F6FC1D465F /* Localizable.xcstrings */; };
+		34893FED1413E8CD54903275 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 1685B784A7682898BC7BA5AD /* PrivacyInfo.xcprivacy */; };
 		39F3E037752E8918CD7F4260 /* LocalAssistAppUI in Frameworks */ = {isa = PBXBuildFile; productRef = F56DF276EC9529872816ED1D /* LocalAssistAppUI */; };
 		41C734909577BF5037DCEE47 /* LocalAssistWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 530C6110899A20B711F3DE30 /* LocalAssistWidgets.swift */; };
+		4586B266B118B0FC7427730A /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9B78943245B1D4DEC2ACD27B /* PrivacyInfo.xcprivacy */; };
 		78BAF314095D16FE34C8A8A8 /* LocalAssistCore in Frameworks */ = {isa = PBXBuildFile; productRef = 42108E34E8F0B7008BE7CA0A /* LocalAssistCore */; };
 		8183F678E9F05A19A3A2D578 /* LocalAssistShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 100D19FDD93D7A4B36352C36 /* LocalAssistShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		BFC076489D64683D42671182 /* LocalAssistAppIntents in Frameworks */ = {isa = PBXBuildFile; productRef = 1D86B0D8943AC4A670A007A5 /* LocalAssistAppIntents */; };
+		C89D06896B3FCB4F5D75F188 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 32FEAF10BB4DF8DFDDABB0F5 /* PrivacyInfo.xcprivacy */; };
 		D74C8C544761FB616FB4351C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 82FF1D7EC5282A4A756425EC /* Assets.xcassets */; };
 		D7803D24F14846782D1A0EBE /* LocalAssistCore in Frameworks */ = {isa = PBXBuildFile; productRef = D051C16E3E17EEED90957D50 /* LocalAssistCore */; };
 		DB4AE5303ECDAD349BF68A17 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D59F165A177F3C9014ED8AF4 /* ShareViewController.swift */; };
 		DF1BD8CA7BEEEEB342DD358D /* LocalAssistApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB96F71AF087606A91C81EB1 /* LocalAssistApp.swift */; };
 		E1752C1D449EF56BF1CCB7E2 /* LocalAssistFoundationModels in Frameworks */ = {isa = PBXBuildFile; productRef = 7C777688435504B873D7A4D0 /* LocalAssistFoundationModels */; };
+		F53990B52EB6928924B4AE6B /* LocalAssistUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAE675397235D553C07685C4 /* LocalAssistUITests.swift */; };
 		F893FB45E2C69FC213781AF5 /* LocalAssistSystemTools in Frameworks */ = {isa = PBXBuildFile; productRef = 1153334359FBB43B0BF5C260 /* LocalAssistSystemTools */; };
 /* End PBXBuildFile section */
 
@@ -28,6 +33,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = 92C0B1C1721189CDD23D6339;
 			remoteInfo = LocalAssistWidgets;
+		};
+		321C3D1B464C18D683AD1CDC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7E7F5AFDDAA9527B9AD3238A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 04B48E43F6357ECAC0022B36;
+			remoteInfo = LocalAssist;
 		};
 		321D25A85F529D1C68BEAD79 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -54,13 +66,19 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		04EB92F8466D27BD4AA20EE3 /* LocalAssistUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = LocalAssistUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		100D19FDD93D7A4B36352C36 /* LocalAssistShare.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = LocalAssistShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		1685B784A7682898BC7BA5AD /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		32FEAF10BB4DF8DFDDABB0F5 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		530C6110899A20B711F3DE30 /* LocalAssistWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalAssistWidgets.swift; sourceTree = "<group>"; };
 		53DCCBE20696642DA66BD5DF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5ED7E8C53374413AB4397426 /* LocalAssist.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = LocalAssist.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		82FF1D7EC5282A4A756425EC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		8C836322D2AF4B6293385B30 /* LocalAssistWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LocalAssistWidgets.entitlements; sourceTree = "<group>"; };
+		9B78943245B1D4DEC2ACD27B /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		BAE675397235D553C07685C4 /* LocalAssistUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalAssistUITests.swift; sourceTree = "<group>"; };
 		C5C84973C77D20E0EE140564 /* build-this-end-to-end-and */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "build-this-end-to-end-and"; path = .; sourceTree = SOURCE_ROOT; };
+		C8F310D757D393F6FC1D465F /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		D59F165A177F3C9014ED8AF4 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		DB96F71AF087606A91C81EB1 /* LocalAssistApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalAssistApp.swift; sourceTree = "<group>"; };
 		E5F9BBCA987616D5B771010B /* LocalAssistWidgets.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = LocalAssistWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -99,6 +117,7 @@
 			children = (
 				CA733D0BC63BE407D0131627 /* LocalAssist */,
 				AD024810D1B9C134AD04A3AA /* LocalAssistShare */,
+				B24903E5EEBB7A9475BB4206 /* LocalAssistUITests */,
 				CAA1FEB2B7B4829D2B388DBF /* LocalAssistWidgets */,
 				957BE41A39892D25162FD8C4 /* Packages */,
 				9B5D117BD0180B4CC40A1AD5 /* Products */,
@@ -118,6 +137,7 @@
 			children = (
 				5ED7E8C53374413AB4397426 /* LocalAssist.app */,
 				100D19FDD93D7A4B36352C36 /* LocalAssistShare.appex */,
+				04EB92F8466D27BD4AA20EE3 /* LocalAssistUITests.xctest */,
 				E5F9BBCA987616D5B771010B /* LocalAssistWidgets.appex */,
 			);
 			name = Products;
@@ -128,10 +148,20 @@
 			children = (
 				E6E2493513D610B7937688D1 /* Info.plist */,
 				F062C0DB8E14F1906F49ED3E /* LocalAssistShare.entitlements */,
+				1685B784A7682898BC7BA5AD /* PrivacyInfo.xcprivacy */,
 				D59F165A177F3C9014ED8AF4 /* ShareViewController.swift */,
 			);
 			name = LocalAssistShare;
 			path = Apps/iOS/LocalAssistShare;
+			sourceTree = "<group>";
+		};
+		B24903E5EEBB7A9475BB4206 /* LocalAssistUITests */ = {
+			isa = PBXGroup;
+			children = (
+				BAE675397235D553C07685C4 /* LocalAssistUITests.swift */,
+			);
+			name = LocalAssistUITests;
+			path = Apps/iOS/LocalAssistUITests;
 			sourceTree = "<group>";
 		};
 		CA733D0BC63BE407D0131627 /* LocalAssist */ = {
@@ -141,6 +171,8 @@
 				EDC2D2D1366B5719213002B4 /* Info.plist */,
 				EBAD0D28D28E9A2E28B29154 /* LocalAssist.entitlements */,
 				DB96F71AF087606A91C81EB1 /* LocalAssistApp.swift */,
+				C8F310D757D393F6FC1D465F /* Localizable.xcstrings */,
+				32FEAF10BB4DF8DFDDABB0F5 /* PrivacyInfo.xcprivacy */,
 			);
 			name = LocalAssist;
 			path = Apps/iOS/LocalAssist;
@@ -152,6 +184,7 @@
 				53DCCBE20696642DA66BD5DF /* Info.plist */,
 				8C836322D2AF4B6293385B30 /* LocalAssistWidgets.entitlements */,
 				530C6110899A20B711F3DE30 /* LocalAssistWidgets.swift */,
+				9B78943245B1D4DEC2ACD27B /* PrivacyInfo.xcprivacy */,
 			);
 			name = LocalAssistWidgets;
 			path = Apps/iOS/LocalAssistWidgets;
@@ -192,6 +225,7 @@
 			buildConfigurationList = D3EBD0FD06F14118B05E446D /* Build configuration list for PBXNativeTarget "LocalAssistShare" */;
 			buildPhases = (
 				6818CF444AFEC74C1DD81AA4 /* Sources */,
+				1953EC69B7F15FB19EA8B3F7 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -204,11 +238,30 @@
 			productReference = 100D19FDD93D7A4B36352C36 /* LocalAssistShare.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		6B654F21268AA25C0DE6A2E9 /* LocalAssistUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8DF8CBB0706E89B4BEA54512 /* Build configuration list for PBXNativeTarget "LocalAssistUITests" */;
+			buildPhases = (
+				F608F3EFA0AF0B2188C18276 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				3285BD69F3CC8575AC7113CF /* PBXTargetDependency */,
+			);
+			name = LocalAssistUITests;
+			packageProductDependencies = (
+			);
+			productName = LocalAssistUITests;
+			productReference = 04EB92F8466D27BD4AA20EE3 /* LocalAssistUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		92C0B1C1721189CDD23D6339 /* LocalAssistWidgets */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 234CAC3C6551AB64C40C3D4A /* Build configuration list for PBXNativeTarget "LocalAssistWidgets" */;
 			buildPhases = (
 				CB911FF56BCA668E0E1F3119 /* Sources */,
+				CC1C580432D84E9DC68F6530 /* Resources */,
 				916042BB45E751C60C605AB8 /* Frameworks */,
 			);
 			buildRules = (
@@ -240,6 +293,11 @@
 						DevelopmentTeam = PYPWZ3JJ26;
 						ProvisioningStyle = Automatic;
 					};
+					6B654F21268AA25C0DE6A2E9 = {
+						DevelopmentTeam = PYPWZ3JJ26;
+						ProvisioningStyle = Automatic;
+						TestTargetID = 04B48E43F6357ECAC0022B36;
+					};
 					92C0B1C1721189CDD23D6339 = {
 						DevelopmentTeam = PYPWZ3JJ26;
 						ProvisioningStyle = Automatic;
@@ -265,17 +323,36 @@
 			targets = (
 				04B48E43F6357ECAC0022B36 /* LocalAssist */,
 				46535ADC5064B242309196D6 /* LocalAssistShare */,
+				6B654F21268AA25C0DE6A2E9 /* LocalAssistUITests */,
 				92C0B1C1721189CDD23D6339 /* LocalAssistWidgets */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		1953EC69B7F15FB19EA8B3F7 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				34893FED1413E8CD54903275 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B365499F4AF10432E007F703 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				D74C8C544761FB616FB4351C /* Assets.xcassets in Resources */,
+				2AD9039E45D86A91579D9391 /* Localizable.xcstrings in Resources */,
+				C89D06896B3FCB4F5D75F188 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CC1C580432D84E9DC68F6530 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4586B266B118B0FC7427730A /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -306,9 +383,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		F608F3EFA0AF0B2188C18276 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F53990B52EB6928924B4AE6B /* LocalAssistUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		3285BD69F3CC8575AC7113CF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 04B48E43F6357ECAC0022B36 /* LocalAssist */;
+			targetProxy = 321C3D1B464C18D683AD1CDC /* PBXContainerItemProxy */;
+		};
 		451497377E1D556938DB3195 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 92C0B1C1721189CDD23D6339 /* LocalAssistWidgets */;
@@ -322,6 +412,25 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		0E42758F98682860FB696588 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.saithej.localassist.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = LocalAssist;
+			};
+			name = Release;
+		};
 		15575E651A350F584B7E8D2C /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -384,6 +493,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.saithej.localassist;
 				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -492,6 +602,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.saithej.localassist;
 				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
@@ -553,6 +664,25 @@
 			};
 			name = Release;
 		};
+		C322D71BB3F945554F9ED6CB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.saithej.localassist.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = LocalAssist;
+			};
+			name = Debug;
+		};
 		F9819EDD06B76A9692F24CF5 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -592,6 +722,15 @@
 			buildConfigurations = (
 				25323E0A5C770E89758CA599 /* Debug */,
 				9701A8768E81C2AC56735265 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		8DF8CBB0706E89B4BEA54512 /* Build configuration list for PBXNativeTarget "LocalAssistUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C322D71BB3F945554F9ED6CB /* Debug */,
+				0E42758F98682860FB696588 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

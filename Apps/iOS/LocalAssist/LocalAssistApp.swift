@@ -6,6 +6,12 @@ import SwiftUI
 struct LocalAssistApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
+    init() {
+        // Crash/hang payloads from MetricKit, written to local files only —
+        // even diagnostics never leave the device.
+        LocalDiagnostics.start()
+    }
+
     var body: some Scene {
         WindowGroup {
             LocalAssistHomeView()

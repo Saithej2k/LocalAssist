@@ -56,7 +56,8 @@ struct LocalAssistBenchmarks {
             }
 
             if arguments.jsonOutput {
-                print(String(decoding: try report.jsonData(), as: UTF8.self))
+                let data = try report.jsonData()
+                print(String(bytes: data, encoding: .utf8) ?? "{}")
             } else {
                 print(report.rendered())
             }
@@ -205,8 +206,11 @@ private struct BenchmarkReport: Codable, Equatable, Sendable {
         concurrency: \(configuration.concurrency)
         successes: \(successCount)
         failures: \(failureCount)
-        latency min / mean / max: \(latencyMilliseconds.minimum.roundedString) / \(latencyMilliseconds.mean.roundedString) / \(latencyMilliseconds.maximum.roundedString) ms
-        latency p50 / p75 / p90 / p95 / p99: \(latencyMilliseconds.p50.roundedString) / \(latencyMilliseconds.p75.roundedString) / \(latencyMilliseconds.p90.roundedString) / \(latencyMilliseconds.p95.roundedString) / \(latencyMilliseconds.p99.roundedString) ms
+        latency min / mean / max: \(latencyMilliseconds.minimum.roundedString) / \
+        \(latencyMilliseconds.mean.roundedString) / \(latencyMilliseconds.maximum.roundedString) ms
+        latency p50 / p75 / p90 / p95 / p99: \(latencyMilliseconds.p50.roundedString) / \
+        \(latencyMilliseconds.p75.roundedString) / \(latencyMilliseconds.p90.roundedString) / \
+        \(latencyMilliseconds.p95.roundedString) / \(latencyMilliseconds.p99.roundedString) ms
         throughput: \(throughputPerSecond.roundedString) requests/sec
         peak memory: \(peakMemoryMB.roundedString) MB
         peak memory delta: \(peakMemoryDeltaMB.roundedString) MB

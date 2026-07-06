@@ -292,7 +292,8 @@ private enum TaskClassifier {
         if lowercased.contains("send") || lowercased.contains("email") || lowercased.contains("message") || lowercased.contains("text ") {
             return .messageDraft
         }
-        if lowercased.contains("review") || lowercased.contains("finish") || lowercased.contains("follow") || lowercased.contains("call") || lowercased.contains("pick up") || lowercased.contains("pay") {
+        let reminderCues = ["review", "finish", "follow", "call", "pick up", "pay"]
+        if reminderCues.contains(where: lowercased.contains) {
             return .reminder
         }
         if lowercased.contains("add")

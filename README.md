@@ -14,6 +14,7 @@ entries. No account. No API key. No network.
 ![Swift 6.2](https://img.shields.io/badge/Swift-6.2-F05138?logo=swift&logoColor=white)
 ![iOS 26+](https://img.shields.io/badge/iOS-26%2B-000000?logo=apple&logoColor=white)
 ![100% on-device](https://img.shields.io/badge/AI-100%25%20on--device-34C759)
+[![MIT License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
 <br>
 
@@ -31,6 +32,7 @@ The moment after you say *"call Mom tonight, grab the birthday cake Saturday, an
 - **Private by design** — capture, transcription, and summarization all run on the phone. Airplane mode is a supported configuration, not an error state.
 - **Two on-device modes** — *Smart brief* uses Apple's Foundation Models framework with constrained decoding; *Instant brief* uses a deterministic rules engine that works on every device, even where Apple Intelligence doesn't. Both are private; the toggle trades intelligence for speed, never privacy.
 - **Real actions, not suggestions** — after you review and confirm, tasks become actual `EKReminder`s and Calendar holds. Nothing is written without an explicit tap.
+- **Machine-readable privacy** — the privacy manifests declare zero data collection and zero tracking, and even crash diagnostics (MetricKit) are written only to local files.
 
 ## How it works
 
@@ -98,6 +100,8 @@ Verification is deterministic and CI-gated — no LLM judges, no flaky assertion
 | `localassist-selftest` (47) | End-to-end scenario checks runnable on any machine | ✅ |
 | `localassist-eval` | Task recall, due-date accuracy, action mapping, structure compliance, hallucination probes over a fixed dataset; dated reports in [docs/evals](docs/evals); CI fails below 0.9 | ✅ 1.00 |
 | `localassist-bench` | p50–p99 latency, throughput, peak memory, fallback rate, cancellation timing; baselines in [docs/performance](docs/performance) | ✅ |
+| XCUITest smoke | Real-UI flow on a simulator: offline auto-run produces an action review, all four tabs navigate | ✅ |
+| SwiftLint | Style and correctness lints on every push | ✅ |
 
 Profiling: `OSSignposter` intervals cover every pipeline stage. See [docs/instrumentation.md](docs/instrumentation.md) and the [Instruments summary](docs/profiling/instruments-summary.md) behind the 1,420 ms → 910 ms p95 optimization.
 

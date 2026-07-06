@@ -39,6 +39,17 @@
          </BuildableReference>
       </MacroExpansion>
       <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "6B654F21268AA25C0DE6A2E9"
+               BuildableName = "LocalAssistUITests.xctest"
+               BlueprintName = "LocalAssistUITests"
+               ReferencedContainer = "container:LocalAssist.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>

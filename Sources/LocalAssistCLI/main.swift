@@ -29,7 +29,7 @@ struct LocalAssistCommand {
                 print(SummaryFormatter.plainText(summary))
             } else {
                 let data = try SummaryFormatter.jsonData(summary, prettyPrinted: true)
-                print(String(decoding: data, as: UTF8.self))
+                print(String(bytes: data, encoding: .utf8) ?? "{}")
             }
         } catch let failure as GenerationFailure {
             FileHandle.standardError.write(Data("localassist: \(failure.userMessage) (\(failure))\n".utf8))

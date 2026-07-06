@@ -353,7 +353,11 @@ private struct SelfTestSuite {
     }
 
     mutating func expect(_ condition: Bool, _ label: String) {
-        condition ? pass() : fail(label)
+        if condition {
+            pass()
+        } else {
+            fail(label)
+        }
     }
 
     mutating func pass() {

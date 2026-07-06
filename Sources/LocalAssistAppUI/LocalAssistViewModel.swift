@@ -353,7 +353,8 @@ public final class LocalAssistViewModel: ObservableObject {
         let formatter = ISO8601DateFormatter()
         for run in history {
             lines.append("## \(run.summary.headline)")
-            lines.append("*\(formatter.string(from: run.summary.generatedAt)) · \(run.request.inputKind.rawValue) · \(run.summary.source == .foundationModels ? "on-device model" : "rules engine")*")
+            let sourceLabel = run.summary.source == .foundationModels ? "on-device model" : "rules engine"
+            lines.append("*\(formatter.string(from: run.summary.generatedAt)) · \(run.request.inputKind.rawValue) · \(sourceLabel)*")
             lines.append("")
             for point in run.summary.keyPoints {
                 lines.append("- \(point)")
