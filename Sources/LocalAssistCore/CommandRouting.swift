@@ -311,7 +311,9 @@ public struct DeterministicCommandRouter: Sendable {
 /// `DueDateParser`, so a hint like "tomorrow 3pm" resolves to 15:00 instead
 /// of the default reminder hour.
 public enum CommandTimeParser {
-    private static let pattern = try! NSRegularExpression(
+    /// Compiled once. The literal is valid by construction; a nil pattern
+    /// would just mean no time is ever extracted, never a crash.
+    private static let pattern = try? NSRegularExpression(
         pattern: #"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b|\b(\d{1,2}):(\d{2})\b"#,
         options: [.caseInsensitive]
     )
@@ -322,7 +324,7 @@ public enum CommandTimeParser {
 
     public static func components(in text: String) -> (hour: Int, minute: Int)? {
         let range = NSRange(text.startIndex..., in: text)
-        guard let match = pattern.firstMatch(in: text, range: range) else {
+        guard let pattern, let match = pattern.firstMatch(in: text, range: range) else {
             return nil
         }
 

@@ -2,22 +2,20 @@ import Foundation
 import XCTest
 @testable import LocalAssistCore
 
+private var utcCalendar: Calendar {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "UTC")!
+    return calendar
+}
+
+/// Tuesday, July 7, 2026, noon UTC.
+private var referenceNow: Date {
+    utcCalendar.date(from: DateComponents(year: 2026, month: 7, day: 7, hour: 12))!
+}
+
 /// Direct-command routing: which inputs skip the brief for the router path,
-/// how the deterministic router parses type/recipient/date/time/draft, and
-/// how the service folds routed actions into reviewable summaries on both
-/// the model and fallback paths.
+/// and how the deterministic router parses type/recipient/date/time/draft.
 final class LocalAssistCommandRoutingTests: XCTestCase {
-    private var utcCalendar: Calendar {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        return calendar
-    }
-
-    /// Tuesday, July 7, 2026, noon UTC.
-    private var referenceNow: Date {
-        utcCalendar.date(from: DateComponents(year: 2026, month: 7, day: 7, hour: 12))!
-    }
-
     // MARK: - Detector
 
     func testDetectorAcceptsDirectCommands() {
@@ -159,6 +157,12 @@ final class LocalAssistCommandRoutingTests: XCTestCase {
         XCTAssertEqual(roundTrip.map { utcCalendar.component(.day, from: $0) }, 12)
     }
 
+}
+
+/// How the service folds routed actions into reviewable summaries on the
+/// model and fallback paths, and how the reconciler corrects live model
+/// failures (example leaks, unasked-for actions, wrong calendar math).
+final class LocalAssistCommandReconciliationTests: XCTestCase {
     // MARK: - Service integration
 
     func testCommandRoutesThroughModelWhenClientSupportsIt() async throws {
