@@ -95,10 +95,9 @@ final class LocalAssistQualityAndExperimentsTests: XCTestCase {
         let experiment = LocalExperiments.Experiment(name: "uniformity", treatmentShare: 0.5)
         var treatment = 0
         let total = 2000
-        for index in 0 ..< total {
-            if LocalExperiments.bucket(installID: "install-\(index)", experiment: experiment) == .treatment {
-                treatment += 1
-            }
+        for index in 0 ..< total
+            where LocalExperiments.bucket(installID: "install-\(index)", experiment: experiment) == .treatment {
+            treatment += 1
         }
         let share = Double(treatment) / Double(total)
         XCTAssertEqual(share, 0.5, accuracy: 0.05, "hash bucketing should split ~50/50, got \(share)")
@@ -109,16 +108,16 @@ final class LocalAssistQualityAndExperimentsTests: XCTestCase {
         // experiment (correlated cohorts poison analysis).
         var differing = 0
         for index in 0 ..< 200 {
-            let id = "install-\(index)"
-            let a = LocalExperiments.bucket(
-                installID: id,
+            let installID = "install-\(index)"
+            let variantA = LocalExperiments.bucket(
+                installID: installID,
                 experiment: .init(name: "exp-a", treatmentShare: 0.5)
             )
-            let b = LocalExperiments.bucket(
-                installID: id,
+            let variantB = LocalExperiments.bucket(
+                installID: installID,
                 experiment: .init(name: "exp-b", treatmentShare: 0.5)
             )
-            if a != b {
+            if variantA != variantB {
                 differing += 1
             }
         }
