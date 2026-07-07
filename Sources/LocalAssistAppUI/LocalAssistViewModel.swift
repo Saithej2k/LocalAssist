@@ -481,7 +481,11 @@ public actor LocalAssistWorker {
             self.actionExecutor = actionExecutor ?? SimulatedActionExecutor()
         #endif
         #if canImport(Contacts)
-            self.contactResolver = contactResolver ?? ContactsFrameworkResolver()
+            // Contact enrichment can prompt for Contacts access; automation
+            // runs (UI tests, screenshots) must stay dialog-free, same as
+            // the onboarding sheet.
+            let isAutomationRun = ProcessInfo.processInfo.environment["LOCALASSIST_AUTO_RUN"] == "1"
+            self.contactResolver = contactResolver ?? (isAutomationRun ? nil : ContactsFrameworkResolver())
         #else
             self.contactResolver = contactResolver
         #endif
