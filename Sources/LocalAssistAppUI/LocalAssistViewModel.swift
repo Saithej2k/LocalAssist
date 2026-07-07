@@ -35,6 +35,9 @@ public final class LocalAssistViewModel: ObservableObject {
     private static let defaultMaxSuggestions = 5
 
     private static let smartModeDefaultsKey = "localassist.usesSmartModel"
+    /// Comma-separated names whose messages/emails outrank everything else.
+    public static let priorityContactsDefaultsKey = "localassist.priorityContacts"
+    public static let defaultPriorityContacts = "mom, dad"
 
     public init(
         inputText: String = "",
@@ -252,7 +255,15 @@ public final class LocalAssistViewModel: ObservableObject {
                 let history = await worker.record(run)
                 guard !Task.isCancelled else { return }
                 self.run = run
-                self.preparedActions = prepared
+                // Messages/emails to the user's priority people (Settings →
+                // Priority contacts) surface above everything else.
+                self.preparedActions = MessageChannelRouter.prioritized(
+                    prepared,
+                    priorityContacts: MessageChannelRouter.priorityContacts(
+                        fromSetting: UserDefaults.standard.string(forKey: Self.priorityContactsDefaultsKey)
+                            ?? Self.defaultPriorityContacts
+                    )
+                )
                 self.history = history
                 self.isGenerating = false
                 await morningBrief.refresh(history: history)
@@ -297,23 +308,30 @@ public final class LocalAssistViewModel: ObservableObject {
         }
     }
 
-    /// Mail composer URL for a confirmed message draft, so the handoff opens
-    /// a real composer instead of ending at a simulated result.
+    /// Composer URL for a confirmed message draft: Messages for personal
+    /// texts (`sms:` with the contact's number), the default mail app for
+    /// email (`mailto:` with address + subject + body — Gmail when the
+    /// user made it their default). The user sends or abandons; the app
+    /// never sends anything itself. Drafts from older runs carry no
+    /// channel and fall back to the email composer, as before.
     public nonisolated static func draftHandoffURL(for action: PreparedToolAction) -> URL? {
         guard action.draft.kind == .messageDraft else {
             return nil
         }
-        let subject = action.draft.payload["subject"] ?? action.draft.payload["title"] ?? action.draft.title
-        let body = action.draft.payload["body"] ?? action.draft.payload["notes"] ?? ""
-
-        var components = URLComponents()
-        components.scheme = "mailto"
-        components.path = ""
-        components.queryItems = [
-            URLQueryItem(name: "subject", value: subject),
-            URLQueryItem(name: "body", value: body),
-        ]
-        return components.url
+        let payload = action.draft.payload
+        let explicit = MessageChannel(rawValue: payload["channel"] ?? "") ?? .auto
+        let channel = MessageChannelRouter.resolve(
+            explicit: explicit,
+            hasPhone: payload["recipientPhone"] != nil,
+            hasEmail: payload["recipientEmail"] != nil
+        )
+        return MessageChannelRouter.handoffURL(
+            channel: channel,
+            phone: payload["recipientPhone"],
+            email: payload["recipientEmail"],
+            subject: payload["subject"] ?? payload["title"] ?? action.draft.title,
+            body: payload["body"] ?? payload["notes"] ?? ""
+        )
     }
 
     /// Executes a staged action after the user's explicit confirmation tap.
@@ -433,6 +451,7 @@ public actor LocalAssistWorker {
     private let summarizer: FoundationModelsSummarizer
     private let actionPreparer: any ToolActionPreparing
     private let actionExecutor: any ToolActionExecuting
+    private let contactResolver: (any ContactResolving)?
     private let toolCounter: ToolInvocationCounter
     private var historyStore: RunHistoryStore?
     private var historyStoreResolved: Bool
@@ -440,6 +459,7 @@ public actor LocalAssistWorker {
     public init(
         actionPreparer: any ToolActionPreparing = DraftOnlyToolActionPreparer(),
         actionExecutor: (any ToolActionExecuting)? = nil,
+        contactResolver: (any ContactResolving)? = nil,
         historyStore: RunHistoryStore? = nil
     ) {
         let counter = ToolInvocationCounter()
@@ -459,6 +479,11 @@ public actor LocalAssistWorker {
             self.actionExecutor = actionExecutor ?? SystemActionExecutor.live()
         #else
             self.actionExecutor = actionExecutor ?? SimulatedActionExecutor()
+        #endif
+        #if canImport(Contacts)
+            self.contactResolver = contactResolver ?? ContactsFrameworkResolver()
+        #else
+            self.contactResolver = contactResolver
         #endif
         self.historyStore = historyStore
         // A nil store means "resolve the shared container on first use" —
@@ -525,9 +550,38 @@ public actor LocalAssistWorker {
         var prepared: [PreparedToolAction] = []
         for draft in drafts {
             try Task.checkCancellation()
-            try prepared.append(await actionPreparer.prepare(draft))
+            try prepared.append(await actionPreparer.prepare(enrichedWithContact(draft)))
         }
         return prepared
+    }
+
+    /// Fills a message draft's recipient phone/email from Contacts so the
+    /// composer opens already addressed, and settles an `auto` channel with
+    /// the personal-vs-work rule (saved with a phone number → Messages,
+    /// email-only → mail). Any lookup failure — access denied, no match —
+    /// leaves the draft untouched and the composer opens unaddressed.
+    private func enrichedWithContact(_ draft: ToolActionDraft) async -> ToolActionDraft {
+        guard draft.kind == .messageDraft,
+              let contactResolver,
+              let recipient = draft.payload["recipient"],
+              let match = try? await contactResolver.contacts(matching: recipient).first
+        else {
+            return draft
+        }
+        var enriched = draft
+        if let phone = match.phoneNumber {
+            enriched.payload["recipientPhone"] = phone
+        }
+        if let email = match.emailAddress {
+            enriched.payload["recipientEmail"] = email
+        }
+        let explicit = MessageChannel(rawValue: draft.payload["channel"] ?? "") ?? .auto
+        enriched.payload["channel"] = MessageChannelRouter.resolve(
+            explicit: explicit,
+            hasPhone: match.hasPhone,
+            hasEmail: match.hasEmail
+        ).rawValue
+        return enriched
     }
 
     public func execute(_ action: PreparedToolAction) async throws -> ExecutedToolAction {

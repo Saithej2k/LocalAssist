@@ -88,6 +88,12 @@ struct EditableActionCard: View {
                             Text(kind.displayTitle)
                                 .font(.system(.caption, design: .rounded, weight: .bold))
                                 .foregroundStyle(.secondary)
+                            if action.draft.payload["priority"] == "urgent" {
+                                Label("Priority", systemImage: "exclamationmark.circle.fill")
+                                    .font(.system(.caption2, design: .rounded, weight: .bold))
+                                    .foregroundStyle(LocalAssistColors.warning)
+                                    .labelStyle(.titleAndIcon)
+                            }
                             Spacer(minLength: 8)
                             Picker("Action type", selection: $kind) {
                                 ForEach(SuggestedAction.reviewCases, id: \.self) { actionKind in

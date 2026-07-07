@@ -75,7 +75,9 @@ import LocalAssistCore
                     displayName: CNContactFormatter.string(from: contact, style: .fullName)
                         ?? name,
                     hasEmail: !contact.emailAddresses.isEmpty,
-                    hasPhone: !contact.phoneNumbers.isEmpty
+                    hasPhone: !contact.phoneNumbers.isEmpty,
+                    emailAddress: contact.emailAddresses.first.map { String($0.value) },
+                    phoneNumber: contact.phoneNumbers.first?.value.stringValue
                 )
             }
         }

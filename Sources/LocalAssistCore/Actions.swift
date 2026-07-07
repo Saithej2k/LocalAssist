@@ -67,13 +67,22 @@ public struct ToolActionPlanner: Sendable {
             )
 
         case .messageDraft:
+            // The title's verb picks the channel ("text" → Messages,
+            // "email" → mail, otherwise the contact card decides at
+            // preparation time) and names the recipient for lookup.
+            let channel = MessageChannelRouter.explicitChannel(forTitle: suggestion.title)
+            var payload = [
+                "subject": suggestion.title,
+                "body": suggestion.rationale,
+                "channel": channel.rawValue
+            ]
+            if let recipient = MessageChannelRouter.recipientName(fromTitle: suggestion.title) {
+                payload["recipient"] = recipient
+            }
             return ToolActionDraft(
                 kind: .messageDraft,
-                title: "Draft follow-up message",
-                payload: [
-                    "subject": suggestion.title,
-                    "body": suggestion.rationale
-                ]
+                title: channel == .textMessage ? "Draft text message" : "Draft follow-up message",
+                payload: payload
             )
 
         case .checklistItem:

@@ -7,6 +7,8 @@ struct SettingsFormView: View {
     /// history changes, not on every Form render.
     @State private var markdownExportURL: URL?
     @State private var jsonExportURL: URL?
+    @AppStorage(LocalAssistViewModel.priorityContactsDefaultsKey)
+    private var priorityContacts = LocalAssistViewModel.defaultPriorityContacts
 
     private var smartModeAvailable: Bool {
         viewModel.availability?.unavailability?.reason != .deviceNotEligible
@@ -46,6 +48,18 @@ struct SettingsFormView: View {
                 Text("Daily moment")
             } footer: {
                 Text("One local notification each morning with what's due today and what you captured yesterday. Scheduled on device — nothing is sent anywhere.")
+            }
+
+            Section {
+                TextField("mom, dad, Anika", text: $priorityContacts)
+                    .autocorrectionDisabled()
+            } header: {
+                Text("Priority contacts")
+            } footer: {
+                Text(
+                    "Messages and emails mentioning these people jump to the top of the action list. "
+                        + "Separate names with commas. The list stays on this phone."
+                )
             }
 
             Section {

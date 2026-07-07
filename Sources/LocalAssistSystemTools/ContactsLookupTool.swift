@@ -6,11 +6,23 @@ public struct ResolvedContact: Equatable, Sendable {
     public var displayName: String
     public var hasEmail: Bool
     public var hasPhone: Bool
+    /// Primary values so drafts can prefill a real composer, not just know
+    /// one exists. Optional: the lookup tool only needs the booleans.
+    public var emailAddress: String?
+    public var phoneNumber: String?
 
-    public init(displayName: String, hasEmail: Bool, hasPhone: Bool) {
+    public init(
+        displayName: String,
+        hasEmail: Bool,
+        hasPhone: Bool,
+        emailAddress: String? = nil,
+        phoneNumber: String? = nil
+    ) {
         self.displayName = displayName
         self.hasEmail = hasEmail
         self.hasPhone = hasPhone
+        self.emailAddress = emailAddress
+        self.phoneNumber = phoneNumber
     }
 }
 
