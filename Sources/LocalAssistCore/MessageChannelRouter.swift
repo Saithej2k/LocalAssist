@@ -43,7 +43,8 @@ public enum MessageChannelRouter {
     // MARK: - Recipient from the title
 
     private static let recipientVerbs: Set<String> = [
-        "text", "message", "imessage", "sms", "email", "e-mail", "mail", "send", "share", "ping",
+        "text", "message", "msg", "imessage", "sms", "tell",
+        "email", "e-mail", "mail", "send", "share", "ping",
     ]
     private static let recipientArticles: Set<String> = ["the", "a", "an", "my", "our"]
     private static let recipientStopwords: Set<String> = [

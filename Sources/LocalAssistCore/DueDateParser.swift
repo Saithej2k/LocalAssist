@@ -13,6 +13,20 @@ public struct DueDateParser: Sendable {
     }
 
     public func date(from hint: String?, relativeTo now: Date = Date()) -> Date? {
+        guard let resolved = baseDate(from: hint, relativeTo: now) else {
+            return nil
+        }
+        // An explicit clock time ("3pm", "11:30") overrides the branch's
+        // default hour, so "tomorrow 3pm" lands at 15:00, not the generic
+        // 9am reminder slot.
+        guard let hint, let time = CommandTimeParser.components(in: hint.lowercased()) else {
+            return resolved
+        }
+        return calendar.date(bySettingHour: time.hour, minute: time.minute, second: 0, of: resolved)
+            ?? resolved
+    }
+
+    private func baseDate(from hint: String?, relativeTo now: Date) -> Date? {
         guard let rawHint = hint?.trimmingCharacters(in: .whitespacesAndNewlines),
               !rawHint.isEmpty
         else {

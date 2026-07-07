@@ -104,6 +104,15 @@ public struct LocalAssistService: Sendable {
         }
         try Task.checkCancellation()
 
+        // Direct commands ("text Priya that brunch works") skip the brief
+        // entirely: the deliverable is a routed, addressed action card, not
+        // a headline with key points. Refinements stay on the brief path —
+        // they are instructions about an existing summary.
+        if !validated.isRefinement,
+           DirectCommandDetector.isDirectCommand(validated.sourceText) {
+            return try await routeDirectCommand(validated, emit: emit, signposter: signposter)
+        }
+
         let chunks = TranscriptChunker.chunks(
             from: validated.sourceText,
             targetCharacters: chunkTargetCharacters
@@ -193,6 +202,85 @@ public struct LocalAssistService: Sendable {
             message: "Combined \(chunks.count) sections offline"
         ))
         return merged
+    }
+
+    // MARK: - Direct command routing
+
+    private func routeDirectCommand(
+        _ request: AssistantRequest,
+        emit: @Sendable (SummaryGenerationUpdate) -> Void,
+        signposter: OSSignposter
+    ) async throws -> StructuredSummary {
+        let routeState = signposter.beginInterval("Route command")
+        defer {
+            signposter.endInterval("Route command", routeState)
+        }
+
+        emit(.init(phase: .checkingAvailability, message: "Checking Foundation Models availability"))
+        let availability: ModelAvailability
+        if let model {
+            availability = await model.availability()
+        } else {
+            availability = .unavailable(ModelUnavailability(reason: .adapterNotConfigured))
+        }
+        try Task.checkCancellation()
+
+        var fallbackReason = availability.unavailability?.detail
+
+        if let model, availability.isAvailable {
+            emit(.init(phase: .streamingModel, message: "Routing command with the on-device model"))
+            do {
+                if let routed = try await model.routeCommand(for: request) {
+                    try Task.checkCancellation()
+                    // Drop example-leaked actions and let the deterministic
+                    // parser win on dates and clock times before anything
+                    // reaches the review cards.
+                    let grounded = RoutedActionReconciler.reconciled(
+                        routed,
+                        sourceText: request.sourceText
+                    )
+                    if !grounded.isEmpty {
+                        let summary = RoutedActionMapper.summary(
+                            from: Array(grounded.prefix(request.maxSuggestions)),
+                            source: .foundationModels,
+                            diagnostics: GenerationDiagnostics(availability: availability)
+                        )
+                        emit(.init(
+                            phase: .completed,
+                            summary: summary,
+                            message: "Routed with Foundation Models"
+                        ))
+                        return summary
+                    }
+                    fallbackReason = "The model produced no actions grounded in the command."
+                } else {
+                    fallbackReason = "The model client does not support command routing."
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let failure as GenerationFailure {
+                fallbackReason = String(describing: failure)
+            } catch {
+                fallbackReason = String(describing: error)
+            }
+        }
+
+        emit(.init(phase: .fallback, message: "Routing command with the offline rules engine"))
+        let action = DeterministicCommandRouter().route(request.sourceText)
+        let summary = RoutedActionMapper.summary(
+            from: [action],
+            source: .deterministicFallback,
+            diagnostics: GenerationDiagnostics(
+                availability: availability,
+                fallbackReason: fallbackReason ?? "Deterministic command routing."
+            )
+        )
+        emit(.init(
+            phase: .completed,
+            summary: summary,
+            message: "Routed with deterministic rules"
+        ))
+        return summary
     }
 
     // MARK: - Single-pass generation

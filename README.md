@@ -36,12 +36,15 @@ The moment after you say *"call Mom tonight, grab the birthday cake Saturday, an
 
 ```mermaid
 flowchart LR
-    A["🎙 Voice / text capture"] --> B{Mode}
+    A["🎙 Voice / text capture"] --> R{Direct<br>command?}
+    R -- "「text Priya…」" --> T["Task router<br>@Generable routed actions<br>(regex router offline)"]
+    R -- "capture" --> B{Mode}
     B -- "Smart" --> C["Foundation Models<br>@Generable DailyBrief<br>(constrained decoding)"]
     B -- "Instant" --> D["Deterministic<br>rules engine"]
     C -- "typed streaming partials" --> E["Normalizer"]
     D --> E
     C -. "free/busy tool call" .-> K[("EventKit<br>Calendar")]
+    T --> F
     E --> F["Editable Action Review"]
     F -- "user confirms" --> G[("Reminders &<br>Calendar")]
 ```
@@ -57,6 +60,7 @@ The engine details that matter:
 | Tool calling | `CalendarAvailabilityTool` reads real free/busy from EventKit so scheduling suggestions land in open slots; `ContactsLookupTool` resolves first names in notes to real contacts (both Foundation Models `Tool`s) |
 | Error taxonomy | Every `GenerationError` and `UnavailableReason` maps to a typed `GenerationFailure`; the deterministic fallback keeps every capture producing a brief, with the exact reason preserved in diagnostics |
 | Due dates | The model resolves relative deadlines to ISO-8601 dates; a deterministic parser handles the rules path and confirmed writes |
+| Direct-command routing | Short commands ("text Priya that Sunday brunch works, 11am") skip the brief: a few-shot `@Generable` router classifies message/email/event/reminder, extracts recipient + date + time, and writes the message draft at parse time — the card opens the composer with exactly what the user reviewed. A regex router covers devices without the model |
 
 ## System integration
 
@@ -75,7 +79,7 @@ The engine details that matter:
 # Full Xcode toolchain required: plain CommandLineTools builds but silently skips XCTest.
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 
-swift test                              # 51 tests
+swift test                              # 92 tests
 swift run localassist-selftest          # 47 end-to-end checks
 swift run localassist-eval --min-score 0.9
 swift run localassist --text "Call Mom tonight, pick up the birthday cake Saturday, and book the dentist for next week." --plain
@@ -94,7 +98,7 @@ Verification is deterministic and CI-gated — no LLM judges, no flaky assertion
 
 | Check | What it covers | Status |
 | --- | --- | --- |
-| `swift test` (51) | Fallback policy, error taxonomy, typed streaming order, map-reduce chunking, task completion persistence, cancellation, concurrency, due-date parsing, local-day due-date policy, capture-kind inference, tool calls, executor writes, conversation memory, legacy decode, eval scorers | ✅ |
+| `swift test` (92) | Fallback policy, error taxonomy, typed streaming order, map-reduce chunking, task completion persistence, cancellation, concurrency, due-date parsing, local-day due-date policy, capture-kind inference, direct-command detection and routing, tool calls, executor writes, conversation memory, legacy decode, eval scorers | ✅ |
 | `localassist-selftest` (47) | End-to-end scenario checks runnable on any machine | ✅ |
 | `localassist-eval` | Task recall, due-date accuracy, action mapping, structure compliance, hallucination probes over a fixed dataset; dated reports in [docs/evals](docs/evals); CI fails below 0.9 | ✅ 1.00 |
 | `localassist-bench` | p50–p99 latency, throughput, peak memory, fallback rate, cancellation timing; baselines in [docs/performance](docs/performance) | ✅ |

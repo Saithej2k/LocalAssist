@@ -13,10 +13,20 @@ public protocol StructuredModelClient: Sendable {
     /// Streams typed snapshots. The final element must have `isComplete == true`.
     /// Failures are surfaced as `GenerationFailure` values.
     func streamSummary(for request: AssistantRequest) -> AsyncThrowingStream<StructuredSummaryPartial, Error>
+
+    /// Parses a direct command ("text Priya that brunch works") into routed
+    /// actions. Returning nil means the client doesn't support routing and
+    /// the service should use the deterministic router instead; throwing a
+    /// `GenerationFailure` means routing was attempted and failed.
+    func routeCommand(for request: AssistantRequest) async throws -> [RoutedAction]?
 }
 
 public extension StructuredModelClient {
     func prewarm() async {}
+
+    func routeCommand(for _: AssistantRequest) async throws -> [RoutedAction]? {
+        nil
+    }
 }
 
 /// Scriptable model double for tests, benchmarks, and previews.
@@ -26,19 +36,34 @@ public struct StaticStructuredModelClient: StructuredModelClient {
     public var failure: GenerationFailure?
     public var initialDelayNanoseconds: UInt64
     public var chunkDelayNanoseconds: UInt64
+    /// Scripted answer for `routeCommand`; nil keeps the protocol default
+    /// ("routing unsupported"), which exercises the deterministic path.
+    public var routedActions: [RoutedAction]?
+    public var routingFailure: GenerationFailure?
 
     public init(
         state: ModelAvailability = .available,
         script: [StructuredSummaryPartial] = [],
         failure: GenerationFailure? = nil,
         initialDelayNanoseconds: UInt64 = 0,
-        chunkDelayNanoseconds: UInt64 = 0
+        chunkDelayNanoseconds: UInt64 = 0,
+        routedActions: [RoutedAction]? = nil,
+        routingFailure: GenerationFailure? = nil
     ) {
         self.state = state
         self.script = script
         self.failure = failure
         self.initialDelayNanoseconds = initialDelayNanoseconds
         self.chunkDelayNanoseconds = chunkDelayNanoseconds
+        self.routedActions = routedActions
+        self.routingFailure = routingFailure
+    }
+
+    public func routeCommand(for _: AssistantRequest) async throws -> [RoutedAction]? {
+        if let routingFailure {
+            throw routingFailure
+        }
+        return routedActions
     }
 
     /// Convenience client that streams towards one complete summary partial.

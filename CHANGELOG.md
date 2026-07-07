@@ -2,6 +2,32 @@
 
 All notable changes to LocalAssist are documented here.
 
+## Unreleased
+
+### Engine
+- Direct-command routing: short inputs that start with a routing verb
+  ("text Priya that Sunday brunch works, 11am", "email HR about leave",
+  "remind me to call mom tomorrow", "meeting with Rahul Thursday 3pm")
+  skip the brief and become addressed, drafted action cards. The Smart
+  path uses a few-shot `@Generable` router contract — validated on-device:
+  example-based guides classify correctly where conditional rules fail —
+  that extracts type, recipient, date, time, and the message draft in one
+  constrained decode, and can split one command into multiple actions.
+  A regex router covers Instant mode and non-Apple-Intelligence devices
+  with a single conservative action. Compound scheduling captures
+  ("schedule the sync and share the agenda") stay on the brief path,
+  which extracts every clause.
+- Model-drafted command messages are final at review time: confirmation
+  opens the composer with exactly the reviewed text plus the LocalAssist
+  signature, instead of composing a second draft.
+- Explicit clock times now survive into system writes everywhere:
+  `DueDateParser` reads "3pm" / "11:30" out of any date hint, so a
+  routed "meeting Thursday 3pm" lands at 15:00 instead of the default
+  morning slot, and edited dates like "2026-07-12 11:00" round-trip.
+- Review-card date edits now win over stale machine dates: changing the
+  date on a calendar hold or reminder clears the original ISO payload
+  keys that previously outranked the edited text in the executor.
+
 ## v1.0.0 — 2026-07-06
 
 The first complete release: a privacy-first, fully on-device capture-to-plan

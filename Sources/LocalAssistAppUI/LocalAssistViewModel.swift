@@ -643,6 +643,16 @@ public actor LocalAssistWorker {
             hasEmail: payload["recipientEmail"] != nil
         )
 
+        // Routed commands arrive with the message already written (the
+        // router drafts at parse time), and the user just reviewed exactly
+        // that text on the card — recomposing here would replace what they
+        // approved. Only the signature is appended.
+        if payload["composed"] == "true", let body = payload["body"], !body.isEmpty {
+            var updated = action
+            updated.draft.payload["body"] = body + MessageBranding.signature(for: channel)
+            return updated
+        }
+
         var composed: ComposedMessageDraft?
         if useModel, let modelDraft = await summarizer.composeMessage(
             recipient: recipient,

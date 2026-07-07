@@ -186,9 +186,13 @@ struct EditableActionCard: View {
             payload.removeValue(forKey: "dateHint")
             payload.removeValue(forKey: "date")
         } else if kind == .calendarHold {
+            // The user's text is now the only date: stale machine keys would
+            // outrank it in the executor's `date ?? dateHint` lookup.
             payload["dateHint"] = cleanDate
+            payload.removeValue(forKey: "date")
         } else {
             payload["dueHint"] = cleanDate
+            payload.removeValue(forKey: "dueDate")
         }
 
         if cleanNotes.isEmpty {
