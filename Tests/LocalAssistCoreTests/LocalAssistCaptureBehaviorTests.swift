@@ -151,62 +151,76 @@ final class LocalAssistCaptureBehaviorTests: XCTestCase {
         XCTAssertTrue(dictation.transcript.hasSuffix("text Priya about brunch"))
     }
 
-    func testDictationSurvivesHypothesisResetsWithoutFinalsOrErrors() {
-        // The exact pattern from the 2026-07-06 screen recording on device:
-        // one recognition runs the whole time, never sending finals or
-        // errors — after each pause its partial hypothesis resets and the
-        // next phrase starts overwriting the previous one. New utterances
-        // stream word by word, so their first partial is short.
+    func testVolatileRewritesReplaceTheLiveHypothesisWithoutDuplication() {
+        // The 2026-07-06 device screenshot: SpeechTranscriber volatile
+        // results legitimately rewrite themselves — sometimes shorter,
+        // sometimes recased ("The landlord…" → "Email the landlord…").
+        // The legacy hypothesis-reset heuristic treated every shrinking
+        // rewrite as a finished segment and duplicated whole phrases; a
+        // volatile must simply replace the previous one.
         var dictation = DictationAccumulator()
 
-        dictation.updatePartial("Call")
-        dictation.updatePartial("Call mom")
-        dictation.updatePartial("Call mom tonight")
+        dictation.updatePartial("The landlord")
+        dictation.updatePartial("The landlord about the broken heater tomorrow")
+        dictation.updatePartial("Email the landlord") // shorter rewrite, not a prefix
+        XCTAssertEqual(dictation.finalizedText, "")
+        XCTAssertEqual(dictation.transcript, "Email the landlord")
 
-        // Pause. Hypothesis resets; the next phrase arrives incrementally.
-        dictation.updatePartial("And")
-        XCTAssertEqual(dictation.finalizedText, "Call mom tonight")
-        dictation.updatePartial("And grab the birthday")
-        dictation.updatePartial("And grab the birthday cake Saturday")
-        XCTAssertEqual(dictation.transcript, "Call mom tonight And grab the birthday cake Saturday")
-
-        // Second pause, third phrase.
-        dictation.updatePartial("And also")
-        dictation.updatePartial("And also text Priya")
-        XCTAssertEqual(
-            dictation.transcript,
-            "Call mom tonight And grab the birthday cake Saturday And also text Priya"
-        )
-
-        // In-utterance revisions that shrink but remain prefixes must NOT fold.
-        var revising = DictationAccumulator()
-        revising.updatePartial("Call mommy")
-        revising.updatePartial("Call mom")
-        XCTAssertEqual(revising.finalizedText, "")
-        XCTAssertEqual(revising.transcript, "Call mom")
+        dictation.finalizeSegment("Email the landlord about the broken heater tomorrow.")
+        XCTAssertEqual(dictation.transcript, "Email the landlord about the broken heater tomorrow.")
     }
 
-    func testDictationFoldsLateFinalsFromSupersededSegments() {
-        // The on-device recognizer can withhold partials entirely and send
-        // the pause error BEFORE the utterance's final text. That late
-        // final is the only carrier of the words — it must fold in even
-        // though the pipeline already chained to the next segment.
+    func testFinalsClearTheVolatileTailTheyFinalize() {
+        // A final settles the same audio the volatile tail was
+        // hypothesizing. Folding the final while keeping the tail rendered
+        // the words twice ("Email the landlord Email the landlord").
         var dictation = DictationAccumulator()
 
-        dictation.endSegmentWithoutFinal() // pause error arrived first; nothing live to fold
-        dictation.foldCompletedSegment("Call Mom tonight, grab the birthday cake Saturday")
-        XCTAssertEqual(dictation.transcript, "Call Mom tonight, grab the birthday cake Saturday")
+        dictation.updatePartial("Email the landlord")
+        dictation.finalizeSegment("Email the landlord")
+        XCTAssertEqual(dictation.transcript, "Email the landlord")
 
         // The same final delivered twice must not duplicate.
-        dictation.foldCompletedSegment("Call Mom tonight, grab the birthday cake Saturday")
-        XCTAssertEqual(dictation.transcript, "Call Mom tonight, grab the birthday cake Saturday")
+        dictation.finalizeSegment("Email the landlord")
+        XCTAssertEqual(dictation.transcript, "Email the landlord")
 
-        // The next utterance finalizes on the live segment as usual.
-        dictation.finalizeSegment("and also text Priya")
-        XCTAssertEqual(
-            dictation.transcript,
-            "Call Mom tonight, grab the birthday cake Saturday and also text Priya"
-        )
+        // The next utterance builds on top.
+        dictation.updatePartial("and also")
+        dictation.updatePartial("and also text Priya")
+        dictation.finalizeSegment("and also text Priya.")
+        XCTAssertEqual(dictation.transcript, "Email the landlord and also text Priya.")
+    }
+
+    func testResetStartsOverMidDictation() {
+        // ✕ during recording: everything accumulated goes; the next
+        // utterance starts a fresh transcript.
+        var dictation = DictationAccumulator()
+
+        dictation.updatePartial("Email the landlord")
+        dictation.finalizeSegment("Email the landlord.")
+        dictation.reset()
+        XCTAssertEqual(dictation.transcript, "")
+
+        dictation.updatePartial("Buy milk")
+        XCTAssertEqual(dictation.transcript, "Buy milk")
+    }
+
+    @MainActor
+    func testClearCaptureForgetsTheVoiceBaseSnapshot() {
+        // Hitting ✕ while recording cleared the box, but the next
+        // transcript update merged onto the stale base snapshot and
+        // resurrected everything the user just cleared.
+        let viewModel = LocalAssistViewModel(worker: LocalAssistWorker(historyStore: nil))
+
+        viewModel.prepareVoiceCapture()
+        viewModel.mergeVoiceTranscript("Email the landlord about the broken heater")
+        XCTAssertEqual(viewModel.inputText, "Email the landlord about the broken heater")
+
+        viewModel.clearCapture()
+        XCTAssertEqual(viewModel.inputText, "")
+
+        viewModel.mergeVoiceTranscript("Buy milk")
+        XCTAssertEqual(viewModel.inputText, "Buy milk")
     }
 
     func testDictationKeepsLongerHypothesisWhenFinalCollapses() {

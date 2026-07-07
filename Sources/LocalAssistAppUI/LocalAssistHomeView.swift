@@ -60,6 +60,9 @@ public struct LocalAssistHomeView: View {
         }
         .task {
             viewModel.prewarm()
+            // Voice prewarm too: asset checks and analyzer setup happen
+            // now, so the first mic tap only has to start audio.
+            voiceTranscriber.prewarm()
             viewModel.refreshAvailability()
             viewModel.loadHistory()
             runLaunchAutomationIfNeeded()
@@ -420,8 +423,11 @@ private struct InputComposerView: View {
             .overlay(alignment: .topTrailing) {
                 if !viewModel.inputText.isEmpty {
                     Button {
-                        viewModel.inputText = ""
-                        viewModel.inputKind = .note
+                        // "Start over", even mid-recording: the dictation
+                        // accumulator and the merge-base snapshot must clear
+                        // with the box, or the next word brings it all back.
+                        viewModel.clearCapture()
+                        voiceTranscriber.resetDictation()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 19))

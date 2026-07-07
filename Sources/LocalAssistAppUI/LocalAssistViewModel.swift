@@ -150,6 +150,16 @@ public final class LocalAssistViewModel: ObservableObject {
             : voiceCaptureBaseText + "\n" + transcript
     }
 
+    /// One-tap ✕ on the capture box. Also forgets the voice-capture base
+    /// snapshot: a recording session may still be live, and its next
+    /// transcript update must merge onto the now-empty box — merging onto
+    /// the old snapshot resurrected everything the user just cleared.
+    public func clearCapture() {
+        inputText = ""
+        inputKind = .note
+        voiceCaptureBaseText = ""
+    }
+
     public func summarize() {
         // The user never picks a capture kind: voice input keeps its kind,
         // typed or scanned text is classified from its own content.
@@ -332,6 +342,7 @@ public final class LocalAssistViewModel: ObservableObject {
     public func clearDraft() {
         inputText = ""
         inputKind = .note
+        voiceCaptureBaseText = ""
         refineInstruction = ""
         run = nil
         preparedActions = []

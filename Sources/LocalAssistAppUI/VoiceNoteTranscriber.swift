@@ -4,9 +4,7 @@ import OSLog
 
 #if os(iOS) && canImport(AVFoundation) && canImport(Speech)
     import AVFoundation
-    // Speech's callbacks predate strict concurrency; the framework's types
-    // are used carefully across actors below.
-    @preconcurrency import Speech
+    import Speech
 #endif
 
 public enum VoiceCaptureState: Equatable {
@@ -27,32 +25,75 @@ public enum VoiceCaptureState: Equatable {
 }
 
 #if os(iOS) && canImport(AVFoundation) && canImport(Speech)
+    /// On-device dictation built on iOS 26's SpeechAnalyzer/SpeechTranscriber.
+    ///
+    /// The legacy SFSpeechRecognizer shim on iOS 26 delivered a chaotic
+    /// partial stream — no finals, hypothesis rewrites after pauses — that
+    /// required fragile heuristics and still produced duplicated or lost
+    /// words. SpeechTranscriber has explicit semantics instead: finalized
+    /// results are additive and never retracted; volatile results are the
+    /// live tail that replaces itself. `DictationAccumulator` maps onto that
+    /// directly, with no guessing.
+    ///
+    /// Startup latency: `prewarm()` (at launch) verifies locale assets,
+    /// resolves the analyzer audio format, and pages the recognition model
+    /// in, so a mic tap only has to activate audio and start a fresh
+    /// analyzer. The session objects themselves are never prepared ahead
+    /// or reused — see `startTranscription` for the ordering the device
+    /// actually requires.
     @MainActor
     public final class VoiceNoteTranscriber: ObservableObject {
-        /// Lengths and codes only — transcripts never reach the log.
-        private static let log = Logger(subsystem: "com.saithej.localassist", category: "Voice")
+        /// Lengths, codes, and timings only — transcripts never reach the log.
+        /// Nonisolated: the audio and permission phases log from off-main.
+        private nonisolated static let log = Logger(subsystem: "com.saithej.localassist", category: "Voice")
 
         @Published public private(set) var state: VoiceCaptureState = .idle
         @Published public private(set) var transcript = ""
         @Published public private(set) var errorMessage: String?
 
         private var audioEngine: AVAudioEngine?
-        private var recognitionTask: SFSpeechRecognitionTask?
-        private var speechRecognizer: SFSpeechRecognizer?
-
-        /// The audio tap outlives any single recognition request: the
-        /// recognizer finalizes a segment after every ~3s pause, so dictation
-        /// is a chain of segment requests all fed by one relay.
-        private let requestRelay = RequestRelay()
-        /// Accumulates finalized segments + live partial; its "finalized
-        /// words are never lost" invariant is unit-tested in isolation.
+        private var analyzer: SpeechAnalyzer?
+        private var resultsTask: Task<Void, Never>?
+        private var inputContinuation: AsyncStream<AnalyzerInput>.Continuation?
         private var accumulator = DictationAccumulator()
-        /// Consecutive error-driven segment restarts with no speech in
-        /// between — bounded so a dead recognizer cannot loop forever.
-        private var errorRestartCount = 0
-        /// Increments per segment; callbacks from superseded segments are
-        /// ignored so one pause can't spawn duplicate recognition chains.
-        private var segmentGeneration = 0
+        /// Increments per session; results from a superseded session are
+        /// ignored.
+        private var sessionGeneration = 0
+
+        /// Locale data warmed by `prewarm()`: assets verified and the
+        /// analyzer audio format resolved. Pure data — reused across
+        /// sessions, unlike the analyzer, which is built fresh per session
+        /// (a prepared-ahead analyzer produced zero results on device,
+        /// 2026-07-06).
+        private struct PreparedAssets {
+            /// What the caller asked for (cache key).
+            let localeIdentifier: String
+            /// The supported locale actually used. SpeechTranscriber covers
+            /// a fixed locale list — unlike SFSpeechRecognizer, an
+            /// unsupported locale (e.g. en_IN) doesn't error, it just never
+            /// produces a result.
+            let resolvedLocale: Locale
+            let format: AVAudioFormat
+        }
+
+        private var preparedAssets: PreparedAssets?
+        private var prewarmTask: Task<Void, Never>?
+        /// The previous session's engine/audio-session cleanup. The next
+        /// session awaits it before touching audio: the shared
+        /// AVAudioSession is a singleton, and a floating deactivation
+        /// landing mid-way through the next activation kills its audio
+        /// (the 2026-07-06 device logs: second session produced no
+        /// results, only "Result accumulator timeout" errors).
+        private var audioCleanupTask: Task<Void, Never>?
+
+        /// Audio-timeline watermarks for "start over" (✕ during recording).
+        /// The recognizer keeps producing results for audio spoken before
+        /// the clear; those must be dropped or the cleared words resurface
+        /// the moment their final arrives.
+        private var latestResultEnd: CMTime = .zero
+        private var discardResultsBefore: CMTime = .zero
+        /// Diagnostic: has this session produced any result yet?
+        private var sawFirstResult = false
 
         public init() {}
 
@@ -60,71 +101,575 @@ public enum VoiceCaptureState: Equatable {
             state.isRecording
         }
 
+        /// Warms everything session-independent before the user taps the
+        /// mic: verifies locale assets, resolves the analyzer audio format,
+        /// and pages the recognition model in once via a throwaway
+        /// prepared analyzer. Best-effort: failures are ignored here and
+        /// surface on the real start.
+        public func prewarm(localeIdentifier: String = Locale.current.identifier) {
+            guard prewarmTask == nil, preparedAssets?.localeIdentifier != localeIdentifier else {
+                return
+            }
+            prewarmTask = Task { [weak self] in
+                guard let self else {
+                    return
+                }
+                defer { self.prewarmTask = nil }
+                if let assets = try? await Self.makeAssets(localeIdentifier: localeIdentifier) {
+                    self.preparedAssets = assets.value
+                    Self.log.info("prewarm ready")
+                }
+            }
+        }
+
         public func start(localeIdentifier: String = Locale.current.identifier) async {
-            guard !isRecording else {
+            guard !state.isActive else {
                 return
             }
 
             state = .requestingPermission
             transcript = ""
             accumulator.reset()
-            errorRestartCount = 0
             errorMessage = nil
+            latestResultEnd = .zero
+            discardResultsBefore = .zero
+            sawFirstResult = false
+            sessionGeneration += 1
+            let generation = sessionGeneration
+            let clock = ContinuousClock()
+            let startedAt = clock.now
 
             do {
                 try await requestPermissions()
-                try await startAudioRecognition(localeIdentifier: localeIdentifier)
+                let permissionsAt = clock.now
+                try await startTranscription(localeIdentifier: localeIdentifier, generation: generation)
+                guard generation == sessionGeneration else {
+                    return
+                }
                 state = .recording
+                let now = clock.now
+                Self.log.info("""
+                session started: gen=\(generation), \
+                permissions=\(Self.milliseconds(permissionsAt - startedAt))ms, \
+                pipeline+audio=\(Self.milliseconds(now - permissionsAt))ms, \
+                total=\(Self.milliseconds(now - startedAt))ms
+                """)
+                // Watchdog: a healthy session shows its first volatile
+                // result within a second or two of speech. Silence past 4s
+                // means the recognizer isn't recognizing — say so loudly.
+                Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(4))
+                    guard let self, self.sessionGeneration == generation,
+                          self.state.isRecording, !self.sawFirstResult
+                    else {
+                        return
+                    }
+                    Self.log.error("no recognition results 4s into gen=\(generation) — locale or audio-path issue")
+                }
             } catch {
-                stopAudio(cancelRecognition: true)
+                guard generation == sessionGeneration else {
+                    return
+                }
+                teardown()
                 let message = (error as? VoiceCaptureError)?.description ?? error.localizedDescription
                 errorMessage = message
                 state = .unavailable(message)
+                // Framework error, no user content — safe to log publicly,
+                // and essential: without it a failing session is unreadable
+                // from Console.
+                Self.log.error("session failed to start: gen=\(generation), error=\(String(describing: error), privacy: .public)")
             }
         }
 
         public func stop() {
-            guard isRecording || state == .requestingPermission else {
+            guard state.isActive else {
                 return
             }
 
-            // Freeze exactly what the user watched appear. Cancelling the
-            // recognition (instead of waiting for a final) prevents the
-            // recognizer's post-hoc re-scoring from replacing a long
-            // transcript with a shorter final hypothesis.
+            let generation = sessionGeneration
+            Self.log.info("stop: draining gen=\(generation), \(self.transcript.count) chars so far")
+
+            // Stop feeding audio and release the mic immediately — but keep
+            // the results pipeline alive. On-device recognition can lag a
+            // short utterance by seconds; tearing down instantly threw away
+            // everything the recognizer was about to deliver, which read as
+            // "spoke, got nothing".
+            inputContinuation?.finish()
+            inputContinuation = nil
+            let engine = audioEngine
+            audioEngine = nil
+            scheduleEngineCleanup(engine: engine, generation: generation)
+
+            let analyzerToFinish = analyzer
+            analyzer = nil
+            state = .idle
+
+            Task { [weak self] in
+                if let analyzerToFinish {
+                    let box = UncheckedSendable(value: analyzerToFinish)
+                    // Finalize drives the remaining results through the
+                    // stream; bound it so a wedged analyzer can't hold the
+                    // pipeline hostage.
+                    await withTaskGroup(of: Void.self) { group in
+                        group.addTask {
+                            try? await box.value.finalizeAndFinishThroughEndOfInput()
+                        }
+                        group.addTask {
+                            try? await Task.sleep(for: .seconds(3))
+                        }
+                        await group.next()
+                        group.cancelAll()
+                    }
+                }
+                guard let self, self.sessionGeneration == generation else {
+                    return
+                }
+                // Everything is in: freeze finalized text plus whatever
+                // volatile tail remains.
+                self.accumulator.endSegmentWithoutFinal()
+                if !self.accumulator.transcript.isEmpty {
+                    self.transcript = self.accumulator.transcript
+                }
+                self.resultsTask?.cancel()
+                self.resultsTask = nil
+                Self.log.info("drained: gen=\(generation), transcript=\(self.transcript.count) chars")
+            }
+        }
+
+        /// Clears dictated text while keeping the session alive — the
+        /// capture box's ✕ during recording means "start over", so the
+        /// accumulated text must go too or the next word brings it back.
+        /// Results still in flight for audio spoken before the clear are
+        /// dropped when they arrive (see `handleResult`) for the same
+        /// reason.
+        public func resetDictation() {
+            accumulator.reset()
+            transcript = ""
+            discardResultsBefore = latestResultEnd
+        }
+
+        // MARK: - Pipeline
+
+        /// Session-independent warmup: verify locale assets and resolve the
+        /// analyzer audio format. Data only — no analyzer is created here.
+        /// A prewarm-time analyzer (kept or throwaway-prepared) left the
+        /// recognition service wedged on device: every later session either
+        /// produced zero results or failed to start (2026-07-06 logs).
+        /// Nonisolated so none of this touches the main thread at launch.
+        private nonisolated static func makeAssets(
+            localeIdentifier: String
+        ) async throws -> UncheckedSendable<PreparedAssets> {
+            let clock = ContinuousClock()
+            let startedAt = clock.now
+
+            // Read-only permission queries warm the permission service's
+            // cache off the critical path — the first status read after a
+            // fresh install cost >1s on the first mic tap otherwise.
+            _ = SFSpeechRecognizer.authorizationStatus()
+            _ = AVAudioApplication.shared.recordPermission
+
+            // Resolve the device locale against what SpeechTranscriber
+            // actually supports; fall back to same-language, then en-US.
+            let requested = Locale(identifier: localeIdentifier)
+            let supported = await SpeechTranscriber.supportedLocales
+            let resolved = Self.resolveLocale(requested: requested, supported: supported)
+            Self.log.info("""
+            locale: requested=\(requested.identifier(.bcp47), privacy: .public), \
+            using=\(resolved.identifier(.bcp47), privacy: .public), \
+            supported=\(supported.count)
+            """)
+
+            let transcriber = Self.makeTranscriber(locale: resolved)
+
+            // Ensure the on-device model for this locale is present. The
+            // first-ever use may download assets; afterwards this returns
+            // immediately.
+            if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
+                try await request.downloadAndInstall()
+            }
+            let installed = await SpeechTranscriber.installedLocales
+                .contains { $0.identifier(.bcp47) == resolved.identifier(.bcp47) }
+            let assetsAt = clock.now
+
+            guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
+                throw VoiceCaptureError.recognizerUnavailable
+            }
+            let now = clock.now
+            Self.log.info("""
+            assets ready: installed=\(installed), \
+            assets=\(Self.milliseconds(assetsAt - startedAt))ms, \
+            format=\(Self.milliseconds(now - assetsAt))ms
+            """)
+
+            return UncheckedSendable(value: PreparedAssets(
+                localeIdentifier: localeIdentifier,
+                resolvedLocale: resolved,
+                format: format
+            ))
+        }
+
+        /// Exact BCP-47 match first, then any variant of the same language,
+        /// then en-US — dictation in a related variant beats none at all.
+        private nonisolated static func resolveLocale(requested: Locale, supported: [Locale]) -> Locale {
+            let requestedTag = requested.identifier(.bcp47)
+            if let exact = supported.first(where: { $0.identifier(.bcp47) == requestedTag }) {
+                return exact
+            }
+            let language = requested.language.languageCode?.identifier
+            if let language,
+               let sameLanguage = supported.first(where: { $0.language.languageCode?.identifier == language }) {
+                return sameLanguage
+            }
+            return supported.first { $0.identifier(.bcp47) == "en-US" } ?? Locale(identifier: "en_US")
+        }
+
+        private nonisolated static func makeTranscriber(locale: Locale) -> SpeechTranscriber {
+            SpeechTranscriber(
+                locale: locale,
+                transcriptionOptions: [],
+                reportingOptions: [.volatileResults],
+                attributeOptions: []
+            )
+        }
+
+        private func assets(localeIdentifier: String) async throws -> PreparedAssets {
+            // An in-flight prewarm is doing exactly this work — let it finish.
+            if let prewarmTask {
+                await prewarmTask.value
+            }
+            if let prepared = preparedAssets, prepared.localeIdentifier == localeIdentifier {
+                Self.log.info("assets: prewarmed")
+                return prepared
+            }
+            Self.log.info("assets: cold")
+            let built = try await Self.makeAssets(localeIdentifier: localeIdentifier).value
+            preparedAssets = built
+            return built
+        }
+
+        private func startTranscription(localeIdentifier: String, generation: Int) async throws {
+            teardown()
+            // The previous session's engine/audio-session cleanup must be
+            // fully done before this one activates audio. It's engine-stop
+            // fast: the analyzer finalize runs on its own floating task.
+            if let cleanup = audioCleanupTask {
+                await cleanup.value
+                audioCleanupTask = nil
+            }
+
+            let assets = try await assets(localeIdentifier: localeIdentifier)
+            // Fresh transcriber + analyzer per session, started only after
+            // the engine is up — the exact ordering that transcribes on
+            // device. A prepared-ahead analyzer or an analyzer started
+            // while the engine was still activating produced zero results
+            // (2026-07-06 device logs).
+            let transcriber = Self.makeTranscriber(locale: assets.resolvedLocale)
+            let sessionAnalyzer = SpeechAnalyzer(modules: [transcriber])
+            let (inputSequence, continuation) = AsyncStream.makeStream(of: AnalyzerInput.self)
+
+            analyzer = sessionAnalyzer
+            inputContinuation = continuation
+
+            let clock = ContinuousClock()
+            let engineAt = clock.now
+            let engineTask = Self.audioEngineTask(continuation: continuation, analyzerFormat: assets.format)
+            audioEngine = try await engineTask.value.value
+            let analyzerAt = clock.now
+            try await sessionAnalyzer.start(inputSequence: inputSequence)
+            let now = clock.now
+            Self.log.info("""
+            audio=\(Self.milliseconds(analyzerAt - engineAt))ms, \
+            analyzer start=\(Self.milliseconds(now - analyzerAt))ms
+            """)
+
+            // Subscribe only after the analyzer is running. Subscribing
+            // before start terminated the results sequence on device
+            // (2026-07-06 logs: zero transcript, then "attempted to update
+            // accumulator after completion" for every real result).
+            resultsTask = Task { [weak self] in
+                do {
+                    for try await result in transcriber.results {
+                        let text = String(result.text.characters)
+                        let isFinal = result.isFinal
+                        let range = result.range
+                        await MainActor.run {
+                            self?.handleResult(text: text, isFinal: isFinal, range: range, generation: generation)
+                        }
+                    }
+                } catch {
+                    let message = error.localizedDescription
+                    await MainActor.run {
+                        self?.handleResultsEnded(message: message, generation: generation)
+                    }
+                }
+            }
+        }
+
+        private nonisolated static func audioEngineTask(
+            continuation: AsyncStream<AnalyzerInput>.Continuation,
+            analyzerFormat: AVAudioFormat
+        ) -> Task<UncheckedSendable<AVAudioEngine>, Error> {
+            let formatBox = UncheckedSendable(value: analyzerFormat)
+            // Everything blocking — session activation, engine startup,
+            // converter creation — happens off the main thread. The tap is
+            // @Sendable and captures only the continuation + converter box.
+            return Task.detached(priority: .userInitiated) { () -> UncheckedSendable<AVAudioEngine> in
+                do {
+                    let clock = ContinuousClock()
+                    let startedAt = clock.now
+                    let audioSession = AVAudioSession.sharedInstance()
+                    // The exact configuration of the build that transcribed
+                    // on device. The category persists, so set it only when
+                    // it changed.
+                    if audioSession.category != .record || audioSession.mode != .measurement {
+                        try audioSession.setCategory(.record, mode: .measurement, options: [.duckOthers])
+                    }
+                    let categoryAt = clock.now
+                    do {
+                        try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+                    } catch {
+                        // '!pri' (insufficient priority): a call, Siri, or a
+                        // screen recording holds the mic. Handoffs are often
+                        // transient — cycle the session and retry once
+                        // before giving up.
+                        Self.log.error("session activation retry after: \(String(describing: error), privacy: .public)")
+                        try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
+                        try? await Task.sleep(for: .milliseconds(400))
+                        try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+                    }
+                    let activeAt = clock.now
+
+                    let engine = AVAudioEngine()
+                    let inputNode = engine.inputNode
+                    let recordingFormat = inputNode.outputFormat(forBus: 0)
+                    let converterBox = UncheckedSendable(
+                        value: AVAudioConverter(from: recordingFormat, to: formatBox.value)
+                    )
+                    // Scalars only — AVAudioFormat isn't Sendable and the
+                    // tap closure must stay @Sendable.
+                    let inputRate = recordingFormat.sampleRate
+                    let inputChannels = recordingFormat.channelCount
+                    let outputRate = formatBox.value.sampleRate
+                    let flow = TapFlowCounter()
+
+                    inputNode.installTap(onBus: 0, bufferSize: 2048, format: recordingFormat) { @Sendable buffer, _ in
+                        guard buffer.frameLength > 0 else {
+                            return
+                        }
+                        guard let converter = converterBox.value else {
+                            continuation.yield(AnalyzerInput(buffer: buffer))
+                            return
+                        }
+                        let ratio = formatBox.value.sampleRate / buffer.format.sampleRate
+                        let capacity = AVAudioFrameCount((Double(buffer.frameLength) * ratio).rounded(.up) + 16)
+                        guard let converted = AVAudioPCMBuffer(pcmFormat: formatBox.value, frameCapacity: capacity) else {
+                            return
+                        }
+                        // The input block is @Sendable in the SDK but runs
+                        // synchronously inside convert() on this thread;
+                        // the boxes never actually cross threads.
+                        let bufferBox = UncheckedSendable(value: buffer)
+                        let consumed = MutableFlag()
+                        var conversionError: NSError?
+                        converter.convert(to: converted, error: &conversionError) { _, inputStatus in
+                            if consumed.value {
+                                inputStatus.pointee = .noDataNow
+                                return nil
+                            }
+                            consumed.value = true
+                            inputStatus.pointee = .haveData
+                            return bufferBox.value
+                        }
+                        guard conversionError == nil, converted.frameLength > 0 else {
+                            return
+                        }
+                        continuation.yield(AnalyzerInput(buffer: converted))
+                        // Tap callbacks are serial; plain increments are safe.
+                        flow.buffers += 1
+                        flow.frames += Int(converted.frameLength)
+                        if flow.buffers == 1 || flow.buffers == 50 {
+                            // Peak of the raw input: ~0 means the mic route
+                            // is delivering silence (a routing/mute problem,
+                            // not a recognition problem).
+                            var peak: Float = 0
+                            if let samples = buffer.floatChannelData?[0] {
+                                for index in 0 ..< Int(buffer.frameLength) {
+                                    peak = max(peak, abs(samples[index]))
+                                }
+                            }
+                            Self.log.info("""
+                            tap: buffer \(flow.buffers), \
+                            \(Int(inputRate))Hz/\(inputChannels)ch -> \(Int(outputRate))Hz, \
+                            \(flow.frames) frames converted, peak=\(peak)
+                            """)
+                        }
+                    }
+
+                    engine.prepare()
+                    try engine.start()
+                    let now = clock.now
+                    Self.log.info("""
+                    audio up: category=\(Self.milliseconds(categoryAt - startedAt))ms, \
+                    activate=\(Self.milliseconds(activeAt - categoryAt))ms, \
+                    engine=\(Self.milliseconds(now - activeAt))ms
+                    """)
+                    return UncheckedSendable(value: engine)
+                } catch {
+                    Self.log.error("audio engine failed: \(String(describing: error), privacy: .public)")
+                    try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+                    let nsError = error as NSError
+                    if nsError.domain == NSOSStatusErrorDomain, nsError.code == 561_017_449 {
+                        throw VoiceCaptureError.microphoneBusy
+                    }
+                    throw error
+                }
+            }
+        }
+
+        private func handleResult(text: String, isFinal: Bool, range: CMTimeRange, generation: Int) {
+            // Generation-only guard: results arriving after stop() are the
+            // drain delivering the user's words — they must still fold in.
+            // A new session bumps the generation and cuts stale ones off.
+            guard generation == sessionGeneration else {
+                return
+            }
+            if !sawFirstResult {
+                sawFirstResult = true
+                Self.log.info("first result: gen=\(generation), final=\(isFinal), \(text.count) chars")
+            }
+            if range.isValid {
+                latestResultEnd = max(latestResultEnd, range.end)
+                // ✕ during recording: this result is for audio spoken
+                // before the clear — the user already discarded those words.
+                if discardResultsBefore > .zero, range.start < discardResultsBefore {
+                    return
+                }
+            }
+            if isFinal {
+                accumulator.finalizeSegment(text)
+                Self.log.info("finalized: \(text.count) chars, total=\(self.accumulator.transcript.count)")
+            } else {
+                accumulator.updatePartial(text)
+            }
+            transcript = accumulator.transcript
+        }
+
+        private func handleResultsEnded(message: String, generation: Int) {
+            guard state.isActive, generation == sessionGeneration else {
+                return
+            }
+            Self.log.info("results stream ended with error: gen=\(generation)")
             accumulator.endSegmentWithoutFinal()
             if !accumulator.transcript.isEmpty {
                 transcript = accumulator.transcript
             }
-            Self.log.info("stop: transcript=\(self.transcript.count) chars, gen=\(self.segmentGeneration)")
-            stopAudio(cancelRecognition: true)
-            state = .idle
+            teardown()
+            errorMessage = message
+            state = .unavailable(message)
         }
 
-        private func requestPermissions() async throws {
-            switch await speechAuthorizationStatus() {
+        // MARK: - Teardown
+
+        /// Heavy teardown detaches so stopping feels instant, split in two:
+        ///
+        /// - The analyzer finalize floats freely — it can block for seconds
+        ///   (a 3s "Result accumulator timeout" when the session got little
+        ///   audio) and nothing downstream depends on it; the next session
+        ///   uses a fresh analyzer.
+        /// - Engine stop + session deactivation go into `audioCleanupTask`,
+        ///   which the next start awaits — and deactivation is skipped
+        ///   entirely if a newer session already took over the shared
+        ///   audio session.
+        private func teardown() {
+            inputContinuation?.finish()
+            inputContinuation = nil
+            resultsTask?.cancel()
+            resultsTask = nil
+
+            let engine = audioEngine
+            let analyzer = self.analyzer
+            audioEngine = nil
+            self.analyzer = nil
+
+            if let analyzer {
+                let analyzerBox = UncheckedSendable(value: analyzer)
+                Task.detached(priority: .utility) {
+                    try? await analyzerBox.value.finalizeAndFinishThroughEndOfInput()
+                }
+            }
+
+            scheduleEngineCleanup(engine: engine, generation: sessionGeneration)
+        }
+
+        private func scheduleEngineCleanup(engine: AVAudioEngine?, generation: Int) {
+            guard engine != nil else {
+                return
+            }
+            let engineBox = UncheckedSendable(value: engine)
+            audioCleanupTask = Task.detached(priority: .userInitiated) { [weak self] in
+                let engine = engineBox.value
+                if engine?.isRunning == true {
+                    engine?.stop()
+                }
+                engine?.inputNode.removeTap(onBus: 0)
+                let superseded = await self?.isSessionSuperseded(by: generation) ?? false
+                if !superseded {
+                    try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+                }
+            }
+        }
+
+        /// True once a newer session owns the shared audio session — the
+        /// old cleanup must then leave deactivation alone.
+        private func isSessionSuperseded(by generation: Int) -> Bool {
+            sessionGeneration != generation || state.isActive
+        }
+
+        // MARK: - Permissions
+
+        /// Nonisolated: the status reads are synchronous permission-service
+        /// calls that can stall (fresh install, busy tccd) — on the main
+        /// actor they froze the UI ("Gesture: System gesture gate timed
+        /// out" in the 2026-07-06 device logs). Off main they cost the same
+        /// but block nobody. The async prompting APIs run only on first use.
+        private nonisolated func requestPermissions() async throws {
+            switch SFSpeechRecognizer.authorizationStatus() {
             case .authorized:
                 break
+            case .notDetermined:
+                Self.log.info("permissions: prompting for speech recognition")
+                guard await requestSpeechAuthorization() == .authorized else {
+                    throw VoiceCaptureError.speechDenied
+                }
             case .denied:
                 throw VoiceCaptureError.speechDenied
             case .restricted:
                 throw VoiceCaptureError.speechRestricted
-            case .notDetermined:
-                throw VoiceCaptureError.speechDenied
             @unknown default:
                 throw VoiceCaptureError.speechDenied
             }
 
-            guard await microphoneAccessGranted() else {
+            switch AVAudioApplication.shared.recordPermission {
+            case .granted:
+                break
+            case .undetermined:
+                Self.log.info("permissions: prompting for microphone")
+                guard await AVAudioApplication.requestRecordPermission() else {
+                    throw VoiceCaptureError.microphoneDenied
+                }
+            case .denied:
+                throw VoiceCaptureError.microphoneDenied
+            @unknown default:
                 throw VoiceCaptureError.microphoneDenied
             }
         }
 
-        // Permission callbacks arrive on a background TCC queue. These
-        // helpers are nonisolated with @Sendable callbacks so the closures
-        // carry no MainActor isolation — otherwise the Swift runtime traps
-        // with dispatch_assert_queue_fail the moment TCC replies.
-        private nonisolated func speechAuthorizationStatus() async -> SFSpeechRecognizerAuthorizationStatus {
+        // The permission prompt's callback arrives on a background TCC
+        // queue. This helper is nonisolated with a @Sendable callback so the
+        // closure carries no MainActor isolation — otherwise the Swift
+        // runtime traps with dispatch_assert_queue_fail the moment TCC
+        // replies.
+        private nonisolated func requestSpeechAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {
             await withCheckedContinuation { continuation in
                 SFSpeechRecognizer.requestAuthorization { @Sendable status in
                     continuation.resume(returning: status)
@@ -132,229 +677,48 @@ public enum VoiceCaptureState: Equatable {
             }
         }
 
-        private nonisolated func microphoneAccessGranted() async -> Bool {
-            await AVAudioApplication.requestRecordPermission()
+        private nonisolated static func milliseconds(_ duration: Duration) -> Int {
+            Int(duration.components.seconds) * 1000
+                + Int(duration.components.attoseconds / 1_000_000_000_000_000)
         }
-
-        private func startAudioRecognition(localeIdentifier: String) async throws {
-            stopAudio(cancelRecognition: true)
-
-            // Everything blocking happens off the main thread: recognizer
-            // asset checks, audio-session activation, and engine startup
-            // each stall for hundreds of milliseconds and together were the
-            // mic-tap hang the hang detector flagged. The tap closure is
-            // @Sendable and captures only the relay.
-            let relay = requestRelay
-            let box = try await Task.detached(priority: .userInitiated) { () -> UncheckedSendable<(SFSpeechRecognizer, AVAudioEngine)> in
-                let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeIdentifier))
-                guard let recognizer else {
-                    throw VoiceCaptureError.recognizerUnavailable
-                }
-                guard recognizer.isAvailable else {
-                    throw VoiceCaptureError.recognizerUnavailable
-                }
-                guard recognizer.supportsOnDeviceRecognition else {
-                    throw VoiceCaptureError.onDeviceRecognitionUnavailable
-                }
-
-                let audioSession = AVAudioSession.sharedInstance()
-                try audioSession.setCategory(.record, mode: .measurement, options: [.duckOthers])
-                try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-
-                let engine = AVAudioEngine()
-                let inputNode = engine.inputNode
-                let recordingFormat = inputNode.outputFormat(forBus: 0)
-                inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { @Sendable buffer, _ in
-                    // Engine teardown can deliver one empty buffer; appending
-                    // it makes CoreAudio log a zero-byte-size complaint.
-                    guard buffer.frameLength > 0 else {
-                        return
-                    }
-                    relay.request?.append(buffer)
-                }
-
-                engine.prepare()
-                try engine.start()
-                return UncheckedSendable(value: (recognizer, engine))
-            }.value
-
-            speechRecognizer = box.value.0
-            audioEngine = box.value.1
-            beginRecognitionSegment(recognizer: box.value.0)
-        }
-
-        /// One recognition request per utterance segment: the recognizer
-        /// finalizes after every pause (~3s of silence), so continuous
-        /// dictation chains segments until the user taps stop. Nothing is
-        /// lost across pauses.
-        private func beginRecognitionSegment(recognizer: SFSpeechRecognizer) {
-            segmentGeneration += 1
-            let generation = segmentGeneration
-            Self.log.info("segment begin: gen=\(generation), folded=\(self.accumulator.finalizedText.count) chars")
-
-            let request = SFSpeechAudioBufferRecognitionRequest()
-            request.shouldReportPartialResults = true
-            request.requiresOnDeviceRecognition = true
-            request.addsPunctuation = true
-            requestRelay.request = request
-
-            // Results arrive off-main; the handler must be @Sendable, with
-            // only Sendable values crossing to the MainActor.
-            recognitionTask = recognizer.recognitionTask(with: request) { @Sendable [weak self] result, error in
-                let latestTranscript = result?.bestTranscription.formattedString
-                let isFinal = result?.isFinal ?? false
-                let nsError = error as NSError?
-                let errorCode = nsError?.code
-                let failureMessage = nsError?.localizedDescription
-
-                Task { @MainActor [weak self] in
-                    self?.handleRecognition(
-                        generation: generation,
-                        latest: latestTranscript,
-                        isFinal: isFinal,
-                        errorCode: errorCode,
-                        failureMessage: failureMessage
-                    )
-                }
-            }
-        }
-
-        private func handleRecognition(
-            generation: Int,
-            latest: String?,
-            isFinal: Bool,
-            errorCode: Int?,
-            failureMessage: String?
-        ) {
-            guard isRecording else {
-                return
-            }
-            let isCurrentSegment = generation == segmentGeneration
-
-            if let latest {
-                errorRestartCount = 0
-                if isFinal {
-                    if isCurrentSegment {
-                        accumulator.finalizeSegment(latest)
-                    } else {
-                        // On-device recognition often withholds partials and
-                        // sends the pause error before the utterance's text.
-                        // This late final is the only carrier of the words —
-                        // fold it; dropping it lost whole phrases.
-                        accumulator.foldCompletedSegment(latest)
-                    }
-                    Self.log.info("final: gen=\(generation) (live=\(isCurrentSegment)), segment=\(latest.count) chars, total=\(self.accumulator.transcript.count)")
-                } else if isCurrentSegment {
-                    let foldedBefore = accumulator.finalizedText.count
-                    accumulator.updatePartial(latest)
-                    if accumulator.finalizedText.count > foldedBefore {
-                        Self.log.info("hypothesis reset folded: gen=\(generation), folded=\(self.accumulator.finalizedText.count) chars")
-                    }
-                }
-                transcript = accumulator.transcript
-            }
-
-            // Control flow — chaining and error handling — belongs to the
-            // live segment only; stale callbacks may contribute text above
-            // but never restarts.
-            guard isCurrentSegment, isFinal || errorCode != nil else {
-                return
-            }
-
-            if !isFinal {
-                // The recognizer often ends a pause with "no speech
-                // detected" instead of a final result. No final means
-                // nothing folded the live partial — fold it here, or the
-                // next segment would overwrite everything already said.
-                let heardNothing = accumulator.currentSegment.isEmpty && latest == nil
-                Self.log.info("segment error end: gen=\(generation), code=\(errorCode ?? 0), folding=\(self.accumulator.currentSegment.count) chars, total=\(self.accumulator.transcript.count)")
-                accumulator.endSegmentWithoutFinal()
-                if !accumulator.transcript.isEmpty {
-                    transcript = accumulator.transcript
-                }
-                if heardNothing {
-                    errorRestartCount += 1
-                }
-            }
-
-            // Segment ended: if audio is still flowing, chain straight into
-            // the next segment; a dead engine or a recognizer stuck in an
-            // error loop ends the session.
-            if let recognizer = speechRecognizer,
-               audioEngine?.isRunning == true,
-               errorRestartCount <= 3 {
-                beginRecognitionSegment(recognizer: recognizer)
-            } else if let failureMessage {
-                stopAudio(cancelRecognition: true)
-                errorMessage = failureMessage
-                state = .unavailable(failureMessage)
-            }
-        }
-
-        /// Detaches the heavy teardown (engine stop, session deactivation —
-        /// each can block for hundreds of milliseconds) so stopping feels
-        /// instant. State is cleared synchronously; the next start creates
-        /// fresh objects, so the detached cleanup can never race a new
-        /// session.
-        private func stopAudio(cancelRecognition: Bool) {
-            let engine = audioEngine
-            let request = requestRelay.request
-            if cancelRecognition {
-                recognitionTask?.cancel()
-            }
-            recognitionTask = nil
-            requestRelay.request = nil
-            audioEngine = nil
-            speechRecognizer = nil
-
-            guard engine != nil || request != nil else {
-                return
-            }
-            let box = UncheckedSendable(value: (engine, request))
-            Task.detached(priority: .userInitiated) {
-                let (engine, request) = box.value
-                if engine?.isRunning == true {
-                    engine?.stop()
-                }
-                engine?.inputNode.removeTap(onBus: 0)
-                request?.endAudio()
-                try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-            }
-        }
-    }
-
-    /// Hands the current segment's recognition request to the realtime audio
-    /// tap. Mutated only on the main actor; the tap only appends buffers —
-    /// the documented usage pattern for SFSpeechAudioBufferRecognitionRequest.
-    private final class RequestRelay: @unchecked Sendable {
-        var request: SFSpeechAudioBufferRecognitionRequest?
     }
 
     /// Carries a non-Sendable value across a boundary the caller has
-    /// verified safe (engine handed back from its setup task).
+    /// verified safe (engine/converter handed between setup contexts).
     private struct UncheckedSendable<T>: @unchecked Sendable {
         let value: T
     }
 
+    /// One-shot flag for the converter input block (see the tap closure).
+    private final class MutableFlag: @unchecked Sendable {
+        var value = false
+    }
+
+    /// Diagnostic counters mutated only from the serial tap callback.
+    private final class TapFlowCounter: @unchecked Sendable {
+        var buffers = 0
+        var frames = 0
+    }
+
     private enum VoiceCaptureError: Error, CustomStringConvertible {
         case microphoneDenied
+        case microphoneBusy
         case speechDenied
         case speechRestricted
         case recognizerUnavailable
-        case onDeviceRecognitionUnavailable
 
         var description: String {
             switch self {
             case .microphoneDenied:
                 "Microphone access is off for LocalAssist."
+            case .microphoneBusy:
+                "The microphone is in use — end any call or screen recording, then try again."
             case .speechDenied:
                 "Speech recognition access is off for LocalAssist."
             case .speechRestricted:
                 "Speech recognition is restricted on this device."
             case .recognizerUnavailable:
                 "Speech recognition is unavailable for the current language."
-            case .onDeviceRecognitionUnavailable:
-                "On-device speech recognition is unavailable for the current language."
             }
         }
     }
@@ -371,6 +735,8 @@ public enum VoiceCaptureState: Equatable {
             false
         }
 
+        public func prewarm(localeIdentifier _: String = Locale.current.identifier) {}
+
         public func start(localeIdentifier _: String = Locale.current.identifier) async {
             errorMessage = "Voice capture requires iPhone."
             state = .unavailable("Voice capture requires iPhone.")
@@ -378,6 +744,10 @@ public enum VoiceCaptureState: Equatable {
 
         public func stop() {
             state = .idle
+        }
+
+        public func resetDictation() {
+            transcript = ""
         }
     }
 #endif

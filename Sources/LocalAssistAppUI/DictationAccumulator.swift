@@ -4,16 +4,19 @@ import Foundation
 /// transcriber so its one invariant is unit-testable without the Speech
 /// framework: **finalized words are never lost.**
 ///
-/// The on-device recognizer works in utterance segments. A segment ends in
-/// one of two ways — a final result, or an error such as "no speech
-/// detected" after a pause. Both paths must fold the words the user watched
-/// appear into the running transcript before the next segment starts;
-/// missing the error path was the bug where continuing to speak after a
-/// pause erased everything said before it.
+/// Maps SpeechTranscriber's result semantics directly: finalized results
+/// are additive and never retracted; a volatile result is the live
+/// hypothesis for the audio since the last final and replaces the previous
+/// volatile wholesale. Volatile rewrites may shrink or recase ("The
+/// landlord…" → "Email the landlord…") — that's the recognizer correcting
+/// itself, not new words. The legacy SFSpeechRecognizer shim needed a
+/// guess-the-hypothesis-reset heuristic here; applied to SpeechTranscriber
+/// volatiles it folded every shrinking rewrite as if it were a finished
+/// segment and duplicated whole phrases.
 public struct DictationAccumulator: Equatable, Sendable {
-    /// Segments the recognizer has completed, joined in order.
+    /// Segments the recognizer has finalized, joined in order.
     public private(set) var finalizedText = ""
-    /// The live partial hypothesis for the segment in progress.
+    /// The live volatile hypothesis since the last final.
     public private(set) var currentSegment = ""
 
     public init() {}
@@ -28,28 +31,16 @@ public struct DictationAccumulator: Equatable, Sendable {
         currentSegment = ""
     }
 
-    /// A revised partial hypothesis for the current segment. Partials may
-    /// shrink as the recognizer corrects itself; finalized text never does.
-    ///
-    /// The on-device recognizer can also reset its hypothesis to a fresh
-    /// utterance after a pause without ever sending a final or an error —
-    /// the new phrase simply starts overwriting the old one. A reset shows
-    /// up as a shorter partial that is not a prefix-revision of the current
-    /// text (new utterances stream word by word, so their first partial is
-    /// short). Fold the old words before accepting it, or every pause
-    /// would erase everything said before it.
+    /// Volatile result: the live hypothesis replaces the previous one,
+    /// shrinking rewrites included.
     public mutating func updatePartial(_ text: String) {
-        let new = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let old = currentSegment.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if !old.isEmpty, !new.isEmpty, new.count < old.count, !old.hasPrefix(new) {
-            fold(currentSegment)
-        }
         currentSegment = text
     }
 
-    /// Segment ended with a final result. Mixed-language finals sometimes
-    /// re-score to something shorter than the partial the user watched —
-    /// whichever preserves more words wins.
+    /// Final result: the segment is settled — fold it and drop the volatile
+    /// tail it supersedes, or the same words render twice. Mixed-language
+    /// finals sometimes re-score to something shorter than the partial the
+    /// user watched appear — whichever preserves more words wins.
     public mutating func finalizeSegment(_ text: String?) {
         let final = text ?? ""
         let segment = final.count >= currentSegment.count ? final : currentSegment
@@ -57,12 +48,12 @@ public struct DictationAccumulator: Equatable, Sendable {
         fold(segment)
     }
 
-    /// A final that arrived late, from a segment the pipeline has already
-    /// moved past. On iOS 26 the on-device recognizer often sends the
-    /// pause error first and the utterance's only text afterwards — these
-    /// late finals are the sole carrier of the words and must fold in.
-    public mutating func foldCompletedSegment(_ text: String) {
-        fold(text)
+    /// Segment ended without a final (results stream error, or the user
+    /// tapping stop). The live partial is all there is — fold it.
+    public mutating func endSegmentWithoutFinal() {
+        let segment = currentSegment
+        currentSegment = ""
+        fold(segment)
     }
 
     private mutating func fold(_ segment: String) {
@@ -73,14 +64,6 @@ public struct DictationAccumulator: Equatable, Sendable {
             return
         }
         finalizedText = Self.joined(finalizedText, trimmed)
-    }
-
-    /// Segment ended without a final (pause "no speech detected", transient
-    /// recognizer error, or the user tapping stop). The live partial is all
-    /// there is — fold it.
-    public mutating func endSegmentWithoutFinal() {
-        finalizedText = Self.joined(finalizedText, currentSegment)
-        currentSegment = ""
     }
 
     public static func joined(_ lhs: String, _ rhs: String) -> String {
