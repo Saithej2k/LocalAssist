@@ -142,6 +142,82 @@ final class LocalAssistMessageRoutingTests: XCTestCase {
         XCTAssertEqual(emailDraft.payload["recipient"], "landlord")
     }
 
+    // MARK: - Composed messages
+
+    func testDeterministicComposerWritesARealMessageNotTheTaskTitle() {
+        let text = DeterministicMessageComposer.compose(
+            recipient: "Priya",
+            title: "Text Priya about Sunday brunch",
+            channel: .textMessage
+        )
+        XCTAssertEqual(text.subject, "Sunday brunch")
+        XCTAssertTrue(text.body.hasPrefix("Hi Priya,"), "the body greets the recipient")
+        XCTAssertTrue(text.body.contains("Sunday brunch"))
+        XCTAssertFalse(text.body.contains("Text Priya"), "the body must not restate the task")
+
+        let email = DeterministicMessageComposer.compose(
+            recipient: "landlord",
+            title: "Email the landlord about the broken heater",
+            channel: .email
+        )
+        XCTAssertEqual(email.subject, "The broken heater")
+        XCTAssertTrue(email.body.hasPrefix("Hi Landlord,"))
+        XCTAssertTrue(email.body.contains("the broken heater"))
+    }
+
+    func testComposerHandlesTitlesWithoutAboutClause() {
+        let composed = DeterministicMessageComposer.compose(
+            recipient: "Mira",
+            title: "Send Mira the blockers",
+            channel: .email
+        )
+        XCTAssertEqual(composed.subject, "The blockers")
+        XCTAssertTrue(composed.body.contains("the blockers"))
+    }
+
+    func testBrandingSignaturesAndArtifactNote() {
+        XCTAssertTrue(MessageBranding.signature(for: .textMessage).contains("LocalAssist"))
+        XCTAssertTrue(MessageBranding.signature(for: .email).contains("LocalAssist"))
+        XCTAssertEqual(MessageBranding.artifactNote, "Added by LocalAssist")
+        XCTAssertFalse(MessageBranding.artifactNote.lowercased().contains("on-device"))
+    }
+
+    @MainActor
+    func testConfirmAndHandoffComposesBodyAndOpensComposer() async throws {
+        // On this platform the Foundation model is unavailable, so this
+        // exercises the deterministic composition path end to end: confirm
+        // → composed subject/body + signature → composer URL → executed
+        // record. The draft's original body (the rationale boilerplate)
+        // must never reach the composer.
+        let viewModel = LocalAssistViewModel(worker: LocalAssistWorker(historyStore: nil))
+        let action = PreparedToolAction(
+            id: "compose-1",
+            draft: ToolActionDraft(
+                kind: .messageDraft,
+                title: "Draft text message",
+                payload: [
+                    "subject": "Text Priya about Sunday brunch",
+                    "body": "Added by LocalAssist",
+                    "channel": "sms",
+                    "recipient": "Priya",
+                    "recipientPhone": "+15550102030",
+                ]
+            ),
+            state: .readyForConfirmation,
+            confirmationTitle: "Draft message",
+            confirmationMessage: "Review before sending"
+        )
+
+        let handoff = await viewModel.confirmAndHandoff(action)
+        let url = try XCTUnwrap(handoff)
+        XCTAssertEqual(url.scheme, "sms")
+        let decoded = try XCTUnwrap(url.absoluteString.removingPercentEncoding)
+        XCTAssertTrue(decoded.contains("Hi Priya,"), "the composer gets a written message, not the task title")
+        XCTAssertTrue(decoded.contains("LocalAssist"), "the signature lands at the end of the draft")
+        XCTAssertFalse(decoded.contains("Added by LocalAssist"), "the rationale boilerplate must not ship")
+        XCTAssertNotNil(viewModel.executedActions["compose-1"], "the confirm is recorded")
+    }
+
     // MARK: - Urgency
 
     func testUrgencyMatchesWholeWordsOnly() {

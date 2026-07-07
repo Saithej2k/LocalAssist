@@ -66,8 +66,14 @@ public enum MessageChannelRouter {
         var collected: [String] = []
         for word in words.dropFirst(verbIndex + 1) {
             let bare = normalized(word)
-            if collected.isEmpty, recipientArticles.contains(bare) {
-                continue
+            if recipientArticles.contains(bare) {
+                // Leading article: the name follows ("email the landlord").
+                // Mid-stream article: the name is over ("send Mira the
+                // blockers" — nobody is called "Mira the blockers").
+                if collected.isEmpty {
+                    continue
+                }
+                break
             }
             if recipientStopwords.contains(bare) || collected.count == 3 {
                 break

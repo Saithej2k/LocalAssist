@@ -91,6 +91,57 @@ public actor FoundationModelsSummarizer: StructuredModelClient {
         memory.clear()
     }
 
+    // MARK: - Message composition
+
+    /// Writes the actual message for a confirmed communication action,
+    /// grounded in the user's captured note. Runs on a one-off session —
+    /// message writing must not pollute the brief conversation the refine
+    /// flow rides on. Returns nil (caller falls back to the deterministic
+    /// template) when the model is unavailable or generation fails: a
+    /// confirmed action must always produce a composer, never an error.
+    public func composeMessage(
+        recipient: String?,
+        task: String,
+        channelDescription: String,
+        capturedNote: String
+    ) async -> (subject: String, body: String)? {
+        guard model.availability == .available else {
+            return nil
+        }
+
+        let instructions = """
+        You write short \(channelDescription)s on the user's behalf. The user \
+        captured a note, an assistant turned it into tasks, and the user just \
+        confirmed one communication task. Write the actual \(channelDescription) \
+        they should send — natural, specific, and complete. Use only facts \
+        from the note; never invent details, times, or commitments.
+        """
+
+        var prompt = "Task the user confirmed: \(task)\n"
+        if let recipient {
+            prompt += "Recipient: \(recipient)\n"
+        }
+        prompt += "The user's original note, for context:\n\(capturedNote)"
+
+        let signposter = OSSignposter(subsystem: "com.saithej.localassist", category: "FoundationModels")
+        let state = signposter.beginInterval("ComposeMessage")
+        defer {
+            signposter.endInterval("ComposeMessage", state)
+        }
+
+        do {
+            let session = LanguageModelSession(model: model, instructions: instructions)
+            let response = try await session.respond(
+                to: prompt,
+                generating: ComposedMessage.self,
+                options: GenerationOptions()
+            )
+            return (response.content.subject, response.content.body)
+        } catch {
+            return nil
+        }
+    }
+
     // MARK: - Generation
 
     private func run(

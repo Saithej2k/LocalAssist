@@ -100,3 +100,20 @@ extension DailyBrief {
     }
 
 }
+
+/// The message-writing contract for confirmed communication actions: the
+/// model composes the actual thing the user will send, grounded in their
+/// captured note — not a restatement of the task title.
+@Generable(description: "A short, ready-to-send message written on the user's behalf.")
+public struct ComposedMessage: Sendable {
+    @Guide(description: "Specific subject line for the message, under eight words. Name the topic, not the act of messaging.")
+    public var subject: String
+
+    @Guide(description: """
+    The complete message body, ready to send exactly as written: first \
+    person as the user, warm and natural, one to four short sentences. \
+    Start with a greeting to the recipient. No placeholders like [name], \
+    no signature, and do not repeat the subject line.
+    """)
+    public var body: String
+}

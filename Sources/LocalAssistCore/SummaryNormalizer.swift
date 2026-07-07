@@ -80,7 +80,7 @@ public struct SummaryNormalizer: Sendable {
             dueHint: displayDueHint,
             dueDate: dueDate,
             action: action,
-            rationale: rationale.isEmpty ? "Suggested by the on-device model." : rationale,
+            rationale: rationale.isEmpty ? MessageBranding.artifactNote : rationale,
             confidence: min(max(partial.confidence ?? 0.72, 0), 1)
         )
     }

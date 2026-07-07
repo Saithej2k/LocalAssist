@@ -351,6 +351,35 @@ public final class LocalAssistViewModel: ObservableObject {
         }
     }
 
+    /// Confirmation for communication actions: the model first writes the
+    /// actual message (subject + ready-to-send body grounded in the
+    /// captured note), then the composer URL for it is returned so the
+    /// caller can open Messages or mail. Non-message actions run the plain
+    /// confirm path and return nil.
+    public func confirmAndHandoff(_ action: PreparedToolAction) async -> URL? {
+        guard action.draft.kind == .messageDraft else {
+            confirmAction(action)
+            return nil
+        }
+        let capturedNote = run?.request.sourceText ?? inputText
+        let composed = await worker.composedMessageAction(
+            action,
+            capturedNote: capturedNote,
+            useModel: usesSmartModel
+        )
+        do {
+            let executed = try await worker.execute(composed)
+            executedActions[action.id] = executed
+        } catch {
+            executedActions[action.id] = ExecutedToolAction(
+                id: action.id,
+                kind: composed.draft.kind,
+                outcome: .skipped(reason: String(describing: error))
+            )
+        }
+        return Self.draftHandoffURL(for: composed)
+    }
+
     public func cancel() {
         generationTask?.cancel()
         isGenerating = false
@@ -590,6 +619,49 @@ public actor LocalAssistWorker {
 
     public func execute(_ action: PreparedToolAction) async throws -> ExecutedToolAction {
         try await actionExecutor.execute(action)
+    }
+
+    /// Composes the actual message for a confirmed communication action:
+    /// the on-device model writes a ready-to-send subject + body from the
+    /// captured note (Smart mode), with the deterministic template as the
+    /// always-works fallback. The LocalAssist signature lands at the end of
+    /// the body — visible and deletable in the composer.
+    public func composedMessageAction(
+        _ action: PreparedToolAction,
+        capturedNote: String,
+        useModel: Bool
+    ) async -> PreparedToolAction {
+        guard action.draft.kind == .messageDraft else {
+            return action
+        }
+        let payload = action.draft.payload
+        let task = payload["subject"] ?? action.draft.title
+        let recipient = payload["recipient"]
+        let channel = MessageChannelRouter.resolve(
+            explicit: MessageChannel(rawValue: payload["channel"] ?? "") ?? .auto,
+            hasPhone: payload["recipientPhone"] != nil,
+            hasEmail: payload["recipientEmail"] != nil
+        )
+
+        var composed: ComposedMessageDraft?
+        if useModel, let modelDraft = await summarizer.composeMessage(
+            recipient: recipient,
+            task: task,
+            channelDescription: channel == .textMessage ? "text message" : "email",
+            capturedNote: capturedNote
+        ) {
+            composed = ComposedMessageDraft(subject: modelDraft.subject, body: modelDraft.body)
+        }
+        let final = composed ?? DeterministicMessageComposer.compose(
+            recipient: recipient,
+            title: task,
+            channel: channel
+        )
+
+        var updated = action
+        updated.draft.payload["subject"] = final.subject
+        updated.draft.payload["body"] = final.body + MessageBranding.signature(for: channel)
+        return updated
     }
 
     public func loadHistory() async -> [AssistantRun] {

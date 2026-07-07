@@ -107,13 +107,14 @@ public struct SystemActionExecutor: ToolActionExecuting {
             )
 
         case .messageDraft:
+            // The full composed body lives in the composer that just
+            // opened; the card only needs to say which message it was.
             let subject = draft.payload["subject"] ?? title
-            let body = draft.payload["body"] ?? ""
             return ExecutedToolAction(
                 id: action.id,
                 kind: .messageDraft,
                 outcome: .simulated(
-                    detail: "Message draft ready — subject: \(subject). \(body)"
+                    detail: "Message draft ready — \(subject)"
                 )
             )
 

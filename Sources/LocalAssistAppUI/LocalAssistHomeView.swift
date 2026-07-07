@@ -146,9 +146,13 @@ public struct LocalAssistHomeView: View {
                         actions: viewModel.preparedActions,
                         executed: viewModel.executedActions,
                         onConfirm: { action in
-                            viewModel.confirmAction(action)
-                            if let url = LocalAssistViewModel.draftHandoffURL(for: action) {
-                                openURL(url)
+                            // Message confirms compose the actual message
+                            // first (on-device model), then open the
+                            // Messages/mail composer with it.
+                            Task {
+                                if let url = await viewModel.confirmAndHandoff(action) {
+                                    openURL(url)
+                                }
                             }
                         }
                     )
