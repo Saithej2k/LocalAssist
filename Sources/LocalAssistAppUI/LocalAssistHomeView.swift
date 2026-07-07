@@ -440,10 +440,12 @@ private struct InputComposerView: View {
                 }
             }
 
-            // Live feedback only: while listening, waiting on permission, or
-            // when something went wrong. The finished transcript lives in the
-            // text box — no lingering status bar repeating it.
-            if voiceTranscriber.isRecording || voiceTranscriber.state == .requestingPermission || voiceTranscriber.errorMessage != nil {
+            // Live feedback only: while listening, waiting on permission,
+            // when something went wrong, or when the finished capture
+            // deserves a quality warning. The finished transcript lives in
+            // the text box — no lingering status bar repeating it.
+            if voiceTranscriber.isRecording || voiceTranscriber.state == .requestingPermission
+                || voiceTranscriber.errorMessage != nil || voiceTranscriber.qualityHint != nil {
                 CompactVoiceStatusView(transcriber: voiceTranscriber)
             }
 
@@ -567,11 +569,17 @@ private struct CompactVoiceStatusView: View {
         if transcriber.errorMessage != nil {
             return "exclamationmark.triangle.fill"
         }
+        if !transcriber.isRecording, transcriber.qualityHint != nil {
+            return "waveform.badge.exclamationmark"
+        }
         return transcriber.isRecording ? "waveform" : "mic.fill"
     }
 
     private var statusColor: Color {
         if transcriber.errorMessage != nil {
+            return LocalAssistColors.warning
+        }
+        if !transcriber.isRecording, transcriber.qualityHint != nil {
             return LocalAssistColors.warning
         }
         return transcriber.isRecording ? LocalAssistColors.danger : LocalAssistColors.accent
@@ -580,6 +588,9 @@ private struct CompactVoiceStatusView: View {
     private var statusTitle: String {
         if transcriber.errorMessage != nil {
             return "Voice needs attention"
+        }
+        if !transcriber.isRecording, transcriber.qualityHint != nil {
+            return "Check the transcript"
         }
         switch transcriber.state {
         case .idle:
@@ -596,6 +607,9 @@ private struct CompactVoiceStatusView: View {
     private var statusDetail: String {
         if let message = transcriber.errorMessage {
             return message
+        }
+        if !transcriber.isRecording, let hint = transcriber.qualityHint {
+            return hint
         }
         if transcriber.isRecording {
             return "Speak naturally. Your transcript will appear in the capture box."

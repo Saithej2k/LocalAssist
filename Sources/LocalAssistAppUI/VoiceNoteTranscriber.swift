@@ -50,6 +50,10 @@ public enum VoiceCaptureState: Equatable {
         @Published public private(set) var state: VoiceCaptureState = .idle
         @Published public private(set) var transcript = ""
         @Published public private(set) var errorMessage: String?
+        /// One-sentence capture-quality verdict set when a session ends —
+        /// nil when the capture looked healthy. Combines recognizer
+        /// confidence with microphone energy (see VoiceCaptureQuality).
+        @Published public private(set) var qualityHint: String?
 
         private var audioEngine: AVAudioEngine?
         private var analyzer: SpeechAnalyzer?
@@ -94,6 +98,17 @@ public enum VoiceCaptureState: Equatable {
         private var discardResultsBefore: CMTime = .zero
         /// Diagnostic: has this session produced any result yet?
         private var sawFirstResult = false
+        /// Mean `transcriptionConfidence` of each finalized result, in
+        /// arrival order — the recognizer's own certainty about the words
+        /// it committed.
+        private var finalConfidences: [Double] = []
+        /// Microphone energy for the live session, written by the tap
+        /// thread and read at drain time.
+        private var audioMeter: LockedAudioMeter?
+
+        private nonisolated static let signposter = OSSignposter(
+            subsystem: "com.saithej.localassist", category: "Voice"
+        )
 
         public init() {}
 
@@ -131,13 +146,18 @@ public enum VoiceCaptureState: Equatable {
             transcript = ""
             accumulator.reset()
             errorMessage = nil
+            qualityHint = nil
             latestResultEnd = .zero
             discardResultsBefore = .zero
             sawFirstResult = false
+            finalConfidences = []
+            audioMeter = nil
             sessionGeneration += 1
             let generation = sessionGeneration
             let clock = ContinuousClock()
             let startedAt = clock.now
+            let signpost = Self.signposter.beginInterval("MicStart")
+            defer { Self.signposter.endInterval("MicStart", signpost) }
 
             do {
                 try await requestPermissions()
@@ -148,11 +168,16 @@ public enum VoiceCaptureState: Equatable {
                 }
                 state = .recording
                 let now = clock.now
+                // Thermal + power state contextualize latency numbers when
+                // comparing devices or hunting regressions in the logs.
+                let process = ProcessInfo.processInfo
                 Self.log.info("""
                 session started: gen=\(generation), \
                 permissions=\(Self.milliseconds(permissionsAt - startedAt))ms, \
                 pipeline+audio=\(Self.milliseconds(now - permissionsAt))ms, \
-                total=\(Self.milliseconds(now - startedAt))ms
+                total=\(Self.milliseconds(now - startedAt))ms, \
+                thermal=\(process.thermalState.rawValue), \
+                lowPower=\(process.isLowPowerModeEnabled)
                 """)
                 // Watchdog: a healthy session shows its first volatile
                 // result within a second or two of speech. Silence past 4s
@@ -204,6 +229,14 @@ public enum VoiceCaptureState: Equatable {
             analyzer = nil
             state = .idle
 
+            // Drain budget is the app's first A/B-shaped knob: control is
+            // the device-proven 3s, treatment would probe 2s. Pinned to
+            // control until the shorter budget has on-device evidence.
+            let drainVariant = LocalExperiments.variant(for: LocalExperiments.micStopDrain)
+            LocalExperiments.logExposure(LocalExperiments.micStopDrain, variant: drainVariant)
+            let drainBudget: Duration = drainVariant == .treatment ? .seconds(2) : .seconds(3)
+
+            let drainSignpost = Self.signposter.beginInterval("StopDrain")
             Task { [weak self] in
                 if let analyzerToFinish {
                     let box = UncheckedSendable(value: analyzerToFinish)
@@ -215,12 +248,13 @@ public enum VoiceCaptureState: Equatable {
                             try? await box.value.finalizeAndFinishThroughEndOfInput()
                         }
                         group.addTask {
-                            try? await Task.sleep(for: .seconds(3))
+                            try? await Task.sleep(for: drainBudget)
                         }
                         await group.next()
                         group.cancelAll()
                     }
                 }
+                Self.signposter.endInterval("StopDrain", drainSignpost)
                 guard let self, self.sessionGeneration == generation else {
                     return
                 }
@@ -232,8 +266,30 @@ public enum VoiceCaptureState: Equatable {
                 }
                 self.resultsTask?.cancel()
                 self.resultsTask = nil
-                Self.log.info("drained: gen=\(generation), transcript=\(self.transcript.count) chars")
+                self.assessQuality(generation: generation)
             }
+        }
+
+        /// Session postmortem: recognizer confidence x microphone energy →
+        /// at most one user-facing hint. Runs after the drain so it judges
+        /// the final transcript, not an intermediate state.
+        private func assessQuality(generation: Int) {
+            let meter = audioMeter?.snapshot ?? AudioLevelMeter()
+            let confidence = finalConfidences.isEmpty
+                ? nil
+                : finalConfidences.reduce(0, +) / Double(finalConfidences.count)
+            qualityHint = TranscriptionQualityAssessor.hint(
+                transcriptCharacters: transcript.count,
+                averageConfidence: confidence,
+                meter: meter
+            )
+            Self.log.info("""
+            drained: gen=\(generation), transcript=\(self.transcript.count) chars, \
+            confidence=\(confidence.map { String(format: "%.2f", $0) } ?? "n/a", privacy: .public), \
+            voiced=\(String(format: "%.2f", meter.voicedRatio), privacy: .public), \
+            maxPeak=\(String(format: "%.3f", meter.maxPeak), privacy: .public), \
+            hint=\(self.qualityHint != nil)
+            """)
         }
 
         /// Clears dictated text while keeping the session alive — the
@@ -245,6 +301,7 @@ public enum VoiceCaptureState: Equatable {
         public func resetDictation() {
             accumulator.reset()
             transcript = ""
+            qualityHint = nil
             discardResultsBefore = latestResultEnd
         }
 
@@ -328,7 +385,9 @@ public enum VoiceCaptureState: Equatable {
                 locale: locale,
                 transcriptionOptions: [],
                 reportingOptions: [.volatileResults],
-                attributeOptions: []
+                // Per-run confidence on finals feeds the session quality
+                // verdict (see VoiceCaptureQuality).
+                attributeOptions: [.transcriptionConfidence]
             )
         }
 
@@ -370,9 +429,16 @@ public enum VoiceCaptureState: Equatable {
             analyzer = sessionAnalyzer
             inputContinuation = continuation
 
+            let meter = LockedAudioMeter()
+            audioMeter = meter
+
             let clock = ContinuousClock()
             let engineAt = clock.now
-            let engineTask = Self.audioEngineTask(continuation: continuation, analyzerFormat: assets.format)
+            let engineTask = Self.audioEngineTask(
+                continuation: continuation,
+                analyzerFormat: assets.format,
+                meter: meter
+            )
             audioEngine = try await engineTask.value.value
             let analyzerAt = clock.now
             try await sessionAnalyzer.start(inputSequence: inputSequence)
@@ -392,8 +458,15 @@ public enum VoiceCaptureState: Equatable {
                         let text = String(result.text.characters)
                         let isFinal = result.isFinal
                         let range = result.range
+                        let confidence = isFinal ? Self.averageConfidence(of: result.text) : nil
                         await MainActor.run {
-                            self?.handleResult(text: text, isFinal: isFinal, range: range, generation: generation)
+                            self?.handleResult(
+                                text: text,
+                                isFinal: isFinal,
+                                range: range,
+                                confidence: confidence,
+                                generation: generation
+                            )
                         }
                     }
                 } catch {
@@ -407,7 +480,8 @@ public enum VoiceCaptureState: Equatable {
 
         private nonisolated static func audioEngineTask(
             continuation: AsyncStream<AnalyzerInput>.Continuation,
-            analyzerFormat: AVAudioFormat
+            analyzerFormat: AVAudioFormat,
+            meter: LockedAudioMeter
         ) -> Task<UncheckedSendable<AVAudioEngine>, Error> {
             let formatBox = UncheckedSendable(value: analyzerFormat)
             // Everything blocking — session activation, engine startup,
@@ -484,19 +558,22 @@ public enum VoiceCaptureState: Equatable {
                             return
                         }
                         continuation.yield(AnalyzerInput(buffer: converted))
+                        // Peak of the raw input: ~0 means the mic route is
+                        // delivering silence (a routing/mute problem, not a
+                        // recognition problem). Feeds the session quality
+                        // verdict.
+                        var peak: Float = 0
+                        if let samples = buffer.floatChannelData?[0] {
+                            for index in 0 ..< Int(buffer.frameLength) {
+                                peak = max(peak, abs(samples[index]))
+                            }
+                        }
+                        meter.record(peak: peak)
+
                         // Tap callbacks are serial; plain increments are safe.
                         flow.buffers += 1
                         flow.frames += Int(converted.frameLength)
                         if flow.buffers == 1 || flow.buffers == 50 {
-                            // Peak of the raw input: ~0 means the mic route
-                            // is delivering silence (a routing/mute problem,
-                            // not a recognition problem).
-                            var peak: Float = 0
-                            if let samples = buffer.floatChannelData?[0] {
-                                for index in 0 ..< Int(buffer.frameLength) {
-                                    peak = max(peak, abs(samples[index]))
-                                }
-                            }
                             Self.log.info("""
                             tap: buffer \(flow.buffers), \
                             \(Int(inputRate))Hz/\(inputChannels)ch -> \(Int(outputRate))Hz, \
@@ -526,7 +603,27 @@ public enum VoiceCaptureState: Equatable {
             }
         }
 
-        private func handleResult(text: String, isFinal: Bool, range: CMTimeRange, generation: Int) {
+        /// Mean of the recognizer's per-run confidence attributes across a
+        /// finalized result; nil when the recognizer attached none.
+        private nonisolated static func averageConfidence(of text: AttributedString) -> Double? {
+            var total = 0.0
+            var count = 0
+            for run in text.runs {
+                if let value = run.transcriptionConfidence {
+                    total += value
+                    count += 1
+                }
+            }
+            return count > 0 ? total / Double(count) : nil
+        }
+
+        private func handleResult(
+            text: String,
+            isFinal: Bool,
+            range: CMTimeRange,
+            confidence: Double?,
+            generation: Int
+        ) {
             // Generation-only guard: results arriving after stop() are the
             // drain delivering the user's words — they must still fold in.
             // A new session bumps the generation and cuts stale ones off.
@@ -547,7 +644,13 @@ public enum VoiceCaptureState: Equatable {
             }
             if isFinal {
                 accumulator.finalizeSegment(text)
-                Self.log.info("finalized: \(text.count) chars, total=\(self.accumulator.transcript.count)")
+                if let confidence {
+                    finalConfidences.append(confidence)
+                }
+                Self.log.info("""
+                finalized: \(text.count) chars, total=\(self.accumulator.transcript.count), \
+                confidence=\(confidence.map { String(format: "%.2f", $0) } ?? "n/a", privacy: .public)
+                """)
             } else {
                 accumulator.updatePartial(text)
             }
@@ -700,6 +803,25 @@ public enum VoiceCaptureState: Equatable {
         var frames = 0
     }
 
+    /// AudioLevelMeter shared between the tap thread (writes) and the main
+    /// actor (reads at drain time), guarded by a lock.
+    private final class LockedAudioMeter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var meter = AudioLevelMeter()
+
+        func record(peak: Float) {
+            lock.lock()
+            meter.record(peak: peak)
+            lock.unlock()
+        }
+
+        var snapshot: AudioLevelMeter {
+            lock.lock()
+            defer { lock.unlock() }
+            return meter
+        }
+    }
+
     private enum VoiceCaptureError: Error, CustomStringConvertible {
         case microphoneDenied
         case microphoneBusy
@@ -728,6 +850,7 @@ public enum VoiceCaptureState: Equatable {
         @Published public private(set) var state: VoiceCaptureState = .unavailable("Voice capture requires iPhone.")
         @Published public private(set) var transcript = ""
         @Published public private(set) var errorMessage: String? = "Voice capture requires iPhone."
+        @Published public private(set) var qualityHint: String?
 
         public init() {}
 
@@ -748,6 +871,7 @@ public enum VoiceCaptureState: Equatable {
 
         public func resetDictation() {
             transcript = ""
+            qualityHint = nil
         }
     }
 #endif
