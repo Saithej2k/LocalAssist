@@ -21,8 +21,6 @@ entries. No account. No API key. No network.
 <img src="docs/screenshots/simulator/06-capture-home-dark.png" width="300" alt="Capture home: one text box, mic, and Generate on a Liquid Glass shelf">&nbsp;&nbsp;
 <img src="docs/screenshots/simulator/07-action-review-dark.png" width="300" alt="Generated brief with editable action review before anything is written">
 
-*Real iPhone 17 (iOS 26.5) simulator captures — no mockups.*
-
 </div>
 
 ## Why
