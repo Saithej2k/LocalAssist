@@ -48,3 +48,20 @@ Record:
 See [2026-07-02-baseline.md](performance/2026-07-02-baseline.md).
 
 The local CLI baseline measures deterministic fallback performance for repeatable CI. It is not the same measurement as the 1,420 ms to 910 ms Foundation Models Instruments profile.
+
+## Voice Capture Signposts
+
+`OSSignposter` category `Voice` (subsystem `com.saithej.localassist`) marks two intervals visible in Instruments' Points of Interest:
+
+- `MicStart` — mic tap to recording (permissions, pipeline, audio activation, analyzer start).
+- `StopDrain` — mic release to final transcript (the bounded wait for late finals).
+
+Each phase also logs its duration, so Console alone can localize a regression:
+
+```
+session started: gen=2, permissions=17ms, pipeline+audio=211ms, total=228ms, thermal=0, lowPower=false
+audio up: category=0ms, activate=56ms, engine=154ms
+drained: gen=2, transcript=182 chars, confidence=0.87, voiced=0.42, maxPeak=0.412, hint=false
+```
+
+Device baseline (iPhone 17 Pro Max, iOS 26.5, 2026-07-07): warm mic start 205–262 ms end to end; cold start after a fresh install is dominated by permission-service reads/prompts (1.2–4.7 s), which launch-time cache warming moves off the tap path.
