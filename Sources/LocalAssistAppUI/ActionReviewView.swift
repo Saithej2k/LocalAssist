@@ -84,10 +84,9 @@ struct EditableActionCard: View {
                         .background(LocalAssistColors.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 8) {
+                        // The picker already names the kind — a second static
+                        // label crowded the row until "Message" hyphenated.
                         HStack {
-                            Text(kind.displayTitle)
-                                .font(.system(.caption, design: .rounded, weight: .bold))
-                                .foregroundStyle(.secondary)
                             if action.draft.payload["priority"] == "urgent" {
                                 Label("Priority", systemImage: "exclamationmark.circle.fill")
                                     .font(.system(.caption2, design: .rounded, weight: .bold))
@@ -102,12 +101,16 @@ struct EditableActionCard: View {
                             }
                             .labelsHidden()
                             .pickerStyle(.menu)
+                            .fixedSize()
                         }
 
                         TextField("Action title", text: $title, axis: .vertical)
                             .font(.system(.headline, design: .rounded, weight: .semibold))
                             .textFieldStyle(.plain)
                             .lineLimit(1 ... 3)
+                            // Without an explicit vertical fit the field
+                            // clips its own descenders ("doing" read "doina").
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
