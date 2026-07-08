@@ -335,9 +335,12 @@ final class LocalAssistCommandReconciliationTests: XCTestCase {
         XCTAssertFalse(summary.keyPoints.isEmpty, "captures keep their key points")
         XCTAssertGreaterThanOrEqual(summary.suggestions.count, 2)
     }
+}
 
-    // MARK: - Reconciler
-
+/// The reconciler's deterministic rules, each named after the live model
+/// failure that earned it, plus the mapper that folds routed actions into
+/// review-ready drafts.
+final class LocalAssistReconcilerRuleTests: XCTestCase {
     func testReconcilerDropsExampleLeakedActions() {
         // Reproduces a live run: routing "text Priya…" produced a second
         // action copied from the prompt's own few-shot examples.
@@ -465,6 +468,76 @@ final class LocalAssistCommandReconciliationTests: XCTestCase {
 
         XCTAssertEqual(reconciled.count, 1, "identical actions collapse to one")
         XCTAssertEqual(reconciled.first?.priority, .high, "family keywords floor the priority")
+    }
+
+    func testReconcilerDropsClauseEchoActions() {
+        // Reproduces a live run: the deferred amma command came back as the
+        // real message plus the routing clause echoed as a second message.
+        let message = RoutedAction(
+            actionType: .message,
+            priority: .high,
+            contactName: "Amma",
+            date: "",
+            time: "",
+            location: "",
+            draftContent: "Hi amma, how are you doing?",
+            emailSubject: "",
+            summary: "Message Amma: checking in"
+        )
+        let clauseEcho = RoutedAction(
+            actionType: .message,
+            priority: .high,
+            contactName: "Amma",
+            date: "",
+            time: "",
+            location: "",
+            draftContent: "Text this to amma now.",
+            emailSubject: "",
+            summary: "Message Amma: text this to amma"
+        )
+
+        let reconciled = RoutedActionReconciler.reconciled(
+            [message, clauseEcho],
+            sourceText: "Hi amma how are you doing, text this to amma now",
+            calendar: utcCalendar,
+            now: referenceNow
+        )
+
+        XCTAssertEqual(reconciled.count, 1)
+        XCTAssertEqual(reconciled.first?.draftContent, "Hi amma, how are you doing?")
+    }
+
+    func testReconcilerClearsLocationsTheCommandNeverGave() {
+        // Reproduces a live run: "meeting with Rahul Thursday 3pm" came back
+        // located in a "Meeting Room" no one mentioned.
+        var event = RoutedAction(
+            actionType: .calendarEvent,
+            priority: .medium,
+            contactName: "Rahul",
+            date: "2026-07-09",
+            time: "15:00",
+            location: "Meeting Room",
+            draftContent: "Meeting with Rahul",
+            emailSubject: "",
+            summary: "Event: meeting with Rahul"
+        )
+
+        let invented = RoutedActionReconciler.reconciled(
+            [event],
+            sourceText: "meeting with Rahul Thursday 3pm",
+            calendar: utcCalendar,
+            now: referenceNow
+        )
+        XCTAssertEqual(invented.first?.location, "", "a place the command never named is cleared")
+
+        event.location = "the office"
+        let kept = RoutedActionReconciler.reconciled(
+            [event],
+            sourceText: "meeting with Rahul Thursday 3pm at the office",
+            calendar: utcCalendar,
+            now: referenceNow
+        )
+        XCTAssertEqual(kept.first?.location, "the office", "a place the command names survives")
     }
 
     func testReconcilerIgnoresDateCuesTheModelInvented() {

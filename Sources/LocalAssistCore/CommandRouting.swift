@@ -456,18 +456,19 @@ public enum CommandTimeParser {
 
 // MARK: - Reconciling model output against the command
 
-/// The on-device model's routed actions need three deterministic
-/// corrections, all observed in live runs. Few-shot examples can leak:
-/// routing "text Priya about brunch" once produced a second action, "remind
-/// me to pick up groceries", copied from the prompt's own examples — so an
-/// action sharing no content words with the command is dropped. The model
-/// also volunteers unasked-for actions ("meeting with Rahul Thursday 3pm"
-/// grew a cheerful message to Rahul) — so an action's type must be asked
-/// for by a verb in the command. And its calendar arithmetic is unreliable
-/// ("Sunday" can land on a Thursday; "Thursday" a week late), the same
-/// weakness `SummaryNormalizer` covers for brief titles — so dates and
-/// times exist only when the command itself carries a parseable cue, and
-/// the deterministic parse always wins over the model's value.
+/// Deterministic corrections for the on-device model's routed actions, every
+/// one earned from a live run. Few-shot examples can leak ("text Priya about
+/// brunch" once grew a "remind me to pick up groceries" copied from the
+/// prompt) — so an action sharing no content words with the command is
+/// dropped. The model volunteers unasked-for actions (the Rahul meeting grew
+/// a cheerful message to Rahul) — so an action's type must be asked for by a
+/// verb in the command. It echoes a deferred command's routing clause back
+/// as its own action ("Text this to amma now" as a second message) — so
+/// clause-only drafts are dropped. It duplicates actions — so identical
+/// type+content pairs collapse. It invents dates, times, and places
+/// ("3pm today" for a Thursday meeting; "Meeting Room" from thin air) — so
+/// dates, times, and locations exist only when the command itself carries
+/// them, the same policy `SummaryNormalizer` applies to brief titles.
 public enum RoutedActionReconciler {
     public static func reconciled(
         _ actions: [RoutedAction],
@@ -489,6 +490,14 @@ public enum RoutedActionReconciler {
             .map { LocalAssistDates.dateOnlyString(from: $0, timeZone: calendar.timeZone) }
         let sourceTime = CommandTimeParser.time(in: lowered)
 
+        // A deferred command's routing clause ("…text this to amma now") is
+        // an instruction, not content — a draft that says nothing beyond the
+        // clause is the clause echoed back as a second action.
+        let clauseWords = DirectCommandDetector.deferredCommand(in: sourceText).map { deferred in
+            contentWords(in: String(sourceText[deferred.clauseRange]))
+                .union([deferred.recipient.lowercased()])
+        }
+
         // The model sometimes emits the same action twice ("Hi amma…" once
         // routed as two identical messages); the first of each type+content
         // pair wins.
@@ -500,12 +509,24 @@ public enum RoutedActionReconciler {
             else {
                 return nil
             }
+            let draftWords = contentWords(in: action.draftContent)
+            if let clauseWords, !draftWords.isEmpty, draftWords.isSubset(of: clauseWords) {
+                return nil
+            }
             let identity = action.actionType.rawValue + "|" + action.contactName.lowercased() + "|"
-                + contentWords(in: action.draftContent).sorted().joined(separator: " ")
+                + draftWords.sorted().joined(separator: " ")
             guard seen.insert(identity).inserted else {
                 return nil
             }
             var reconciled = action
+
+            // Locations follow the grounding rule too: "Meeting Room" on a
+            // command that names no place is a model invention, and a wrong
+            // prefilled location is worse than an empty field.
+            let locationWords = contentWords(in: action.location)
+            if !locationWords.isEmpty, !locationWords.isSubset(of: sourceWords) {
+                reconciled.location = ""
+            }
             // Family and work keywords are a deterministic priority floor —
             // the model may raise priority for its own reasons, never lower
             // it below what the command plainly says.
