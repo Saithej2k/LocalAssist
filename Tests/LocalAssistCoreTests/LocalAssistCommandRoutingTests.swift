@@ -56,6 +56,57 @@ final class LocalAssistCommandRoutingTests: XCTestCase {
         ))
     }
 
+    func testDetectorAcceptsDeferredCommands() {
+        // The message first, the verb last — the shape natural dictation takes.
+        XCTAssertTrue(DirectCommandDetector.isDirectCommand(
+            "Hi amma how are you doing, text this to amma now"
+        ))
+        XCTAssertTrue(DirectCommandDetector.isDirectCommand(
+            "The report is ready for review, email this to the team"
+        ))
+        // Multiple sentences are fine here — the content IS the message.
+        XCTAssertTrue(DirectCommandDetector.isDirectCommand(
+            "Hi amma. Hope the garden is doing well. Send this to amma"
+        ))
+        // The clause alone has no message to defer to.
+        XCTAssertNil(DirectCommandDetector.deferredCommand(in: "send this to mom"))
+    }
+
+    func testDeferredCommandKeepsTheUsersWordsAsTheBody() {
+        let action = DeterministicCommandRouter(calendar: utcCalendar).route(
+            "Hi amma how are you doing, text this to amma now",
+            relativeTo: referenceNow
+        )
+
+        XCTAssertEqual(action.actionType, .message)
+        XCTAssertEqual(action.contactName, "Amma")
+        XCTAssertEqual(action.draftContent, "Hi amma how are you doing")
+        XCTAssertEqual(action.priority, .high, "amma is a family keyword")
+        XCTAssertEqual(action.date, "", "\"now\" is the send urgency, not a due date")
+    }
+
+    func testDeferredEmailRoutesToMailWithSubject() {
+        let action = DeterministicCommandRouter(calendar: utcCalendar).route(
+            "The report is ready for review, email this to the team",
+            relativeTo: referenceNow
+        )
+
+        XCTAssertEqual(action.actionType, .email)
+        XCTAssertEqual(action.contactName, "Team")
+        XCTAssertEqual(action.draftContent, "The report is ready for review")
+        XCTAssertFalse(action.emailSubject.isEmpty)
+    }
+
+    func testLeadingVerbOutranksDeferredClause() {
+        // "remind me to text this to amma" is a reminder about texting,
+        // not a text.
+        let action = DeterministicCommandRouter(calendar: utcCalendar).route(
+            "remind me to text this to amma",
+            relativeTo: referenceNow
+        )
+        XCTAssertEqual(action.actionType, .reminder)
+    }
+
     // MARK: - Deterministic router
 
     func testMessageCommandParsesContactTimeDateAndDraft() {
@@ -387,6 +438,59 @@ final class LocalAssistCommandReconciliationTests: XCTestCase {
             reconciled.first?.date, "2026-07-09",
             "the model's off-by-a-week Thursday is corrected from the command"
         )
+        XCTAssertEqual(reconciled.first?.time, "15:00")
+    }
+
+    func testReconcilerCollapsesDuplicateActionsAndFloorsPriority() {
+        // Reproduces a live run: "Hi amma…, text this to amma now" came back
+        // as two identical message actions at normal priority.
+        let draft = RoutedAction(
+            actionType: .message,
+            priority: .medium,
+            contactName: "Amma",
+            date: "",
+            time: "",
+            location: "",
+            draftContent: "Hi amma, how are you doing?",
+            emailSubject: "",
+            summary: "Message Amma: checking in"
+        )
+
+        let reconciled = RoutedActionReconciler.reconciled(
+            [draft, draft],
+            sourceText: "Hi amma how are you doing, text this to amma now",
+            calendar: utcCalendar,
+            now: referenceNow
+        )
+
+        XCTAssertEqual(reconciled.count, 1, "identical actions collapse to one")
+        XCTAssertEqual(reconciled.first?.priority, .high, "family keywords floor the priority")
+    }
+
+    func testReconcilerIgnoresDateCuesTheModelInvented() {
+        // Reproduces a live run: "meeting with Rahul Thursday 3pm" came back
+        // drafted as "Meet Rahul at the meeting room at 3pm today" — the
+        // invented "today" must not beat the command's Thursday.
+        let event = RoutedAction(
+            actionType: .calendarEvent,
+            priority: .medium,
+            contactName: "Rahul",
+            date: "2026-07-07",
+            time: "15:00",
+            location: "",
+            draftContent: "Meet Rahul at the meeting room at 3pm today",
+            emailSubject: "",
+            summary: "Event: meeting with Rahul"
+        )
+
+        let reconciled = RoutedActionReconciler.reconciled(
+            [event],
+            sourceText: "meeting with Rahul Thursday 3pm",
+            calendar: utcCalendar,
+            now: referenceNow
+        )
+
+        XCTAssertEqual(reconciled.first?.date, "2026-07-09", "the command's Thursday wins")
         XCTAssertEqual(reconciled.first?.time, "15:00")
     }
 

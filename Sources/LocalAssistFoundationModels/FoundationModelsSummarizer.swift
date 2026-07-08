@@ -203,6 +203,8 @@ public actor FoundationModelsSummarizer: StructuredModelClient {
         "schedule dentist appointment Tuesday 2pm" → calendarEvent
         "remind me to pick up groceries" → reminder
         "remind me to finish the presentation" → reminder
+        "hi amma how are you doing, text this to amma now" → message
+        "the report is ready for review, email this to the team" → email
 
         Most commands are exactly ONE action. Only extract a second action \
         when the command explicitly asks for one, like "text Priya about \
@@ -214,6 +216,9 @@ public actor FoundationModelsSummarizer: StructuredModelClient {
         Write as the user, casual tone, 1-2 sentences, no greetings or \
         sign-offs, no emojis unless the command had one. Use only facts from \
         the command; never invent details, times, or commitments.
+        When the command says "text this", "send this", or "email this", the \
+        user already wrote the message: the draft is their exact words with \
+        the routing clause removed, never a paraphrase.
 
         Date resolution:
         "today" → \(today)

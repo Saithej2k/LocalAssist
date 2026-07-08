@@ -109,30 +109,80 @@ public enum DirectCommandDetector {
             return false
         }
 
-        // Multi-sentence input is a note. A single trailing period is fine.
-        let sentences = trimmed
-            .components(separatedBy: CharacterSet(charactersIn: ".!?"))
-            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-        guard sentences.count <= 1 else {
-            return false
-        }
-
         let lowered = trimmed.lowercased()
-        guard let match = commandPrefixes.first(where: { lowered.hasPrefix($0.prefix) }) else {
-            return false
+        if let match = commandPrefixes.first(where: { lowered.hasPrefix($0.prefix) }) {
+            // Multi-sentence input is a note. A single trailing period is fine.
+            let sentences = trimmed
+                .components(separatedBy: CharacterSet(charactersIn: ".!?"))
+                .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            if sentences.count <= 1 {
+                // Compound scheduling and reminder captures ("schedule the
+                // sync and send the agenda") stay on the brief path: it
+                // extracts every clause as its own task, while the
+                // single-action router would drop all but the first. Message
+                // and email commands stay routed even when compound —
+                // drafting the message is the whole point.
+                switch match.type {
+                case .message, .email:
+                    return true
+                case .calendarEvent, .reminder:
+                    if !lowered.contains(" and ") {
+                        return true
+                    }
+                }
+            }
         }
 
-        // Compound scheduling and reminder captures ("schedule the sync and
-        // send the agenda") stay on the brief path: it extracts every clause
-        // as its own task, while the single-action router would drop all but
-        // the first. Message and email commands stay routed even when
-        // compound — drafting the message is the whole point.
-        switch match.type {
-        case .message, .email:
-            return true
-        case .calendarEvent, .reminder:
-            return !lowered.contains(" and ")
+        // Deferred commands put the message first and the verb last:
+        // "Hi amma how are you doing, text this to amma now". The "this"
+        // makes the shape precise, so multiple sentences are fine — the
+        // content IS the message.
+        return deferredCommand(in: trimmed) != nil
+    }
+
+    /// The routed order for a deferred command: the message body is the
+    /// user's own words with the routing clause removed.
+    public struct DeferredCommand: Equatable, Sendable {
+        public var type: RoutedActionType
+        public var recipient: String
+        /// The command clause's range within the input it was matched in.
+        public var clauseRange: Range<String.Index>
+    }
+
+    /// "text this to amma now", "send that to mom", "email it to HR".
+    /// Compiled once; the literal is valid by construction.
+    private static let deferredPattern = try? NSRegularExpression(
+        pattern: #"(?:,\s*)?(?:and\s+)?\b(text|send|message|imessage|sms|email|mail)"#
+            + #"\s+(?:this|that|it)\s+to\s+(?:(?:the|my|our)\s+)?(\w+)"#
+            + #"(?:\s+(?:now|please|asap|today|tonight))*[.!?]?"#,
+        options: [.caseInsensitive]
+    )
+
+    public static func deferredCommand(in text: String) -> DeferredCommand? {
+        guard let deferredPattern else {
+            return nil
         }
+        let range = NSRange(text.startIndex..., in: text)
+        guard let match = deferredPattern.firstMatch(in: text, range: range),
+              let clauseRange = Range(match.range, in: text),
+              let verbRange = Range(match.range(at: 1), in: text),
+              let recipientRange = Range(match.range(at: 2), in: text)
+        else {
+            return nil
+        }
+        // A deferred command needs content to defer to — the clause alone
+        // ("send this to mom") has no message and stays a prefix command.
+        let remainder = text.replacingCharacters(in: clauseRange, with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !remainder.isEmpty else {
+            return nil
+        }
+        let verb = text[verbRange].lowercased()
+        return DeferredCommand(
+            type: verb == "email" || verb == "mail" ? .email : .message,
+            recipient: String(text[recipientRange]),
+            clauseRange: clauseRange
+        )
     }
 }
 
@@ -158,6 +208,15 @@ public struct DeterministicCommandRouter: Sendable {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         let lowered = trimmed.lowercased()
 
+        // Deferred shape ("Hi amma how are you doing, text this to amma"):
+        // the message is the user's own words with the routing clause
+        // removed. A leading verb wins — "remind me to text this to amma"
+        // is a reminder about texting, not a text.
+        if !DirectCommandDetector.commandPrefixes.contains(where: { lowered.hasPrefix($0.prefix) }),
+           let deferred = DirectCommandDetector.deferredCommand(in: trimmed) {
+            return deferredAction(deferred, in: trimmed, relativeTo: now)
+        }
+
         let actionType = Self.actionType(for: lowered)
         let time = CommandTimeParser.time(in: lowered) ?? ""
         let date = dateParser.date(from: lowered, relativeTo: now)
@@ -178,6 +237,38 @@ public struct DeterministicCommandRouter: Sendable {
             draftContent: draft,
             emailSubject: actionType == .email ? String(draft.prefix(50)) : "",
             summary: Self.summaryLine(for: actionType, contact: contact, draft: draft)
+        )
+    }
+
+    // MARK: Deferred commands
+
+    private func deferredAction(
+        _ deferred: DirectCommandDetector.DeferredCommand,
+        in input: String,
+        relativeTo now: Date
+    ) -> RoutedAction {
+        // The body is exactly what the user wrote, minus the routing clause
+        // and any comma it dangled from — never a paraphrase.
+        var body = input
+        body.removeSubrange(deferred.clauseRange)
+        body = body
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ",;: "))
+            .sentenceCapitalized()
+
+        let lowered = body.lowercased()
+        let contact = deferred.recipient.sentenceCapitalized()
+        return RoutedAction(
+            actionType: deferred.type,
+            priority: Self.isHighPriority(input.lowercased()) ? .high : .medium,
+            contactName: contact,
+            date: dateParser.date(from: lowered, relativeTo: now)
+                .map { LocalAssistDates.dateOnlyString(from: $0, timeZone: calendar.timeZone) } ?? "",
+            time: CommandTimeParser.time(in: lowered) ?? "",
+            location: "",
+            draftContent: body,
+            emailSubject: deferred.type == .email ? String(body.prefix(50)) : "",
+            summary: Self.summaryLine(for: deferred.type, contact: contact, draft: body)
         )
     }
 
@@ -278,7 +369,9 @@ public struct DeterministicCommandRouter: Sendable {
         "office", "boss", "client", "deadline", "urgent", "asap",
     ]
 
-    private static func isHighPriority(_ lowered: String) -> Bool {
+    /// Shared with the reconciler so model-routed actions get the same
+    /// priority floor the deterministic router applies.
+    static func isHighPriority(_ lowered: String) -> Bool {
         let words = Set(
             lowered
                 .components(separatedBy: CharacterSet.alphanumerics.inverted)
@@ -396,36 +489,60 @@ public enum RoutedActionReconciler {
             .map { LocalAssistDates.dateOnlyString(from: $0, timeZone: calendar.timeZone) }
         let sourceTime = CommandTimeParser.time(in: lowered)
 
+        // The model sometimes emits the same action twice ("Hi amma…" once
+        // routed as two identical messages); the first of each type+content
+        // pair wins.
+        var seen = Set<String>()
+
         return actions.compactMap { action in
             guard admissible.contains(action.actionType),
                   isGrounded(action, in: sourceContentWords)
             else {
                 return nil
             }
+            let identity = action.actionType.rawValue + "|" + action.contactName.lowercased() + "|"
+                + contentWords(in: action.draftContent).sorted().joined(separator: " ")
+            guard seen.insert(identity).inserted else {
+                return nil
+            }
             var reconciled = action
+            // Family and work keywords are a deterministic priority floor —
+            // the model may raise priority for its own reasons, never lower
+            // it below what the command plainly says.
+            if DeterministicCommandRouter.isHighPriority(lowered) {
+                reconciled.priority = .high
+            }
             let actionText = "\(action.draftContent) \(action.summary)".lowercased()
 
             // A command without a date cue dates nothing — a model-invented
             // date on a real reminder is worse than an empty field the user
-            // can fill on the card. With a cue, the per-action parse settles
-            // which action it belongs to, and the whole-command parse covers
-            // drafts that dropped the day's name.
+            // can fill on the card. With a cue, a cue the draft shares with
+            // the command settles which action it belongs to; drafts with no
+            // shared cue take the command's date. Cues found only in the
+            // draft are model inventions ("3pm today" for a Thursday
+            // meeting) and never count.
             if sourceDate == nil {
                 reconciled.date = ""
-            } else if let date = dateParser.date(from: actionText, relativeTo: now) {
+            } else if let cue = dateCues.first(where: { lowered.contains($0) && actionText.contains($0) }),
+                      let date = dateParser.date(from: cue, relativeTo: now) {
                 reconciled.date = LocalAssistDates.dateOnlyString(from: date, timeZone: calendar.timeZone)
             } else {
                 reconciled.date = sourceDate ?? ""
             }
 
-            if sourceTime == nil {
-                reconciled.time = ""
-            } else {
-                reconciled.time = CommandTimeParser.time(in: actionText) ?? sourceTime ?? ""
-            }
+            // Same for clock times: the command's time is the only one that
+            // counts.
+            reconciled.time = sourceTime ?? ""
             return reconciled
         }
     }
+
+    /// Cue words a draft can share with the command to claim a date.
+    /// Mirrors what `DueDateParser` resolves.
+    private static let dateCues = [
+        "today", "tomorrow", "tonight", "next week", "this week",
+        "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    ]
 
     /// An action type is admissible when the command asks for it: the
     /// routing verb that opened the command, plus any communication or

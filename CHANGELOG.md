@@ -5,6 +5,16 @@ All notable changes to LocalAssist are documented here.
 ## Unreleased
 
 ### Engine
+- Deferred commands route too: "Hi amma how are you doing, text this to
+  amma now" puts the message first and the verb last — the router now
+  recognizes "text/send/email this to X" anywhere in a short input and
+  makes the action's body the user's own words with the routing clause
+  removed, on both the Smart and Instant paths. A leading verb still
+  wins ("remind me to text this to amma" stays a reminder).
+- The routed-action reconciler collapses duplicate actions, floors
+  priority with the family/work keywords the rules engine uses, and only
+  honors date cues the command itself contains — a draft that invents
+  "today" for a Thursday meeting no longer moves the hold.
 - Direct-command routing: short inputs that start with a routing verb
   ("text Priya that Sunday brunch works, 11am", "email HR about leave",
   "remind me to call mom tomorrow", "meeting with Rahul Thursday 3pm")
