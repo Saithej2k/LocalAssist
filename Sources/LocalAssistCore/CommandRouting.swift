@@ -508,10 +508,11 @@ public enum RoutedActionReconciler {
                 .union([deferred.recipient.lowercased()])
         }
 
-        // The model sometimes emits the same action twice ("Hi amma…" once
-        // routed as two identical messages); the first of each type+content
-        // pair wins.
-        var seen = Set<String>()
+        // Model actions sometimes duplicate on any of three axes: identical
+        // content words, identical summary title, or clause-echo variants
+        // padded with a greeting. Track all three.
+        var seenContent = Set<String>()
+        var seenSummary = Set<String>()
 
         return actions.compactMap { action in
             guard admissible.contains(action.actionType),
@@ -520,12 +521,32 @@ public enum RoutedActionReconciler {
                 return nil
             }
             let draftWords = contentWords(in: action.draftContent)
-            if let clauseWords, !draftWords.isEmpty, draftWords.isSubset(of: clauseWords) {
+            // Clause echo: whatever the draft says beyond its greeting
+            // ("Hi", "Hello", …) is entirely inside the routing clause.
+            // A padded echo like "Hi amma, text this to me now." leaks
+            // through a straight isSubset check because "hi" isn't in the
+            // clause words; stripping greetings first catches it.
+            if let clauseWords {
+                let padded = draftWords.subtracting(greetingWords)
+                if !padded.isEmpty, padded.isSubset(of: clauseWords) {
+                    return nil
+                }
+            }
+            let contentIdentity = action.actionType.rawValue + "|"
+                + action.contactName.lowercased() + "|"
+                + draftWords.sorted().joined(separator: " ")
+            guard seenContent.insert(contentIdentity).inserted else {
                 return nil
             }
-            let identity = action.actionType.rawValue + "|" + action.contactName.lowercased() + "|"
-                + draftWords.sorted().joined(separator: " ")
-            guard seen.insert(identity).inserted else {
+            // Summary-level dedupe covers pairs like ("Text to amma",
+            // "Text to amma") whose drafts differ only in punctuation the
+            // content-word set already normalizes — the belt-and-braces
+            // step catches the runs where two model turns landed on the
+            // same headline for two different-looking drafts.
+            let summaryKey = action.actionType.rawValue + "|"
+                + action.contactName.lowercased() + "|"
+                + action.summary.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            if !action.summary.isEmpty, !seenSummary.insert(summaryKey).inserted {
                 return nil
             }
             var reconciled = action
@@ -567,6 +588,14 @@ public enum RoutedActionReconciler {
             return reconciled
         }
     }
+
+    /// Salutations the model habitually prepends to a routed draft.
+    /// Stripped before the clause-echo comparison so "Hi amma, text this
+    /// to me now" is recognized as an instruction echoed back with a
+    /// greeting, not a real message.
+    private static let greetingWords: Set<String> = [
+        "hi", "hey", "hello", "yo", "greetings", "howdy",
+    ]
 
     /// Cue words a draft can share with the command to claim a date.
     /// Mirrors what `DueDateParser` resolves.

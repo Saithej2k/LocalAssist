@@ -515,6 +515,76 @@ final class LocalAssistReconcilerRuleTests: XCTestCase {
         XCTAssertEqual(reconciled.first?.priority, .high, "family keywords floor the priority")
     }
 
+    func testReconcilerDropsClauseEchoWithGreetingPrefix() {
+        // Reproduces a live run on the phone: the deferred amma command
+        // came back with a real message plus "Hi amma, text this to me
+        // now." — the routing clause with a greeting prepended. The
+        // straight isSubset check missed it because "hi" isn't in the
+        // clause words.
+        let real = RoutedAction(
+            actionType: .message,
+            priority: .high,
+            contactName: "Amma",
+            date: "",
+            time: "",
+            location: "",
+            draftContent: "Hi amma, how are you doing?",
+            emailSubject: "",
+            summary: "Text amma about her well-being."
+        )
+        let paddedEcho = RoutedAction(
+            actionType: .message,
+            priority: .high,
+            contactName: "Amma",
+            date: "",
+            time: "",
+            location: "",
+            draftContent: "Hi amma, text this to me now.",
+            emailSubject: "",
+            summary: "Send this text to me immediately."
+        )
+
+        let reconciled = RoutedActionReconciler.reconciled(
+            [real, paddedEcho],
+            sourceText: "Hi amma how are you doing, text this to amma now",
+            calendar: utcCalendar,
+            now: referenceNow
+        )
+
+        XCTAssertEqual(reconciled.count, 1)
+        XCTAssertEqual(reconciled.first?.draftContent, "Hi amma, how are you doing?")
+    }
+
+    func testReconcilerDedupesBySummaryTitleToo() {
+        // Reproduces a live run where the model returned two message
+        // actions with the same summary ("Text to amma") but with drafts
+        // that differed by a single word, escaping the content-word
+        // dedupe.
+        let first = RoutedAction(
+            actionType: .message,
+            priority: .high,
+            contactName: "Amma",
+            date: "",
+            time: "",
+            location: "",
+            draftContent: "Hey amma, checking in.",
+            emailSubject: "",
+            summary: "Text to amma"
+        )
+        var second = first
+        second.draftContent = "Hi amma, just checking in."
+        second.summary = "Text to amma"
+
+        let reconciled = RoutedActionReconciler.reconciled(
+            [first, second],
+            sourceText: "Hi amma how are you, text this to amma now",
+            calendar: utcCalendar,
+            now: referenceNow
+        )
+
+        XCTAssertEqual(reconciled.count, 1)
+    }
+
     func testReconcilerDropsClauseEchoActions() {
         // Reproduces a live run: the deferred amma command came back as the
         // real message plus the routing clause echoed as a second message.
@@ -663,6 +733,30 @@ final class LocalAssistReconcilerRuleTests: XCTestCase {
     }
 
     // MARK: - Mapper
+
+    func testRoutedSummariesAreMarkedForBriefSuppression() {
+        // The home screen uses `wasRoutedCommand` to hide the Brief block
+        // for a routed run, avoiding a "Hi amma, I'm fine." headline
+        // sitting under a review card that says exactly the same thing.
+        let routed = RoutedActionMapper.summary(
+            from: [
+                RoutedAction(
+                    actionType: .message,
+                    priority: .high,
+                    contactName: "Amma",
+                    date: "",
+                    time: "",
+                    location: "",
+                    draftContent: "Hi amma, I'm fine.",
+                    emailSubject: "",
+                    summary: "Message Amma"
+                ),
+            ],
+            source: .foundationModels,
+            diagnostics: GenerationDiagnostics(availability: .available)
+        )
+        XCTAssertTrue(routed.wasRoutedCommand, "empty keyPoints marks the router path")
+    }
 
     func testMapperBuildsEditableDateStringsAndDueDates() {
         let action = RoutedAction(

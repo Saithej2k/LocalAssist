@@ -405,6 +405,16 @@ public extension StructuredSummary {
         get { suggestions }
         set { suggestions = newValue }
     }
+
+    /// Whether this summary was produced by the direct-command router.
+    /// The brief pipeline's `SummaryNormalizer` requires a non-empty
+    /// `keyPoints`; the router mapper sets it empty by design because a
+    /// routed command's card carries the whole story. The current-run
+    /// screen uses this to avoid showing the same one-liner twice — once
+    /// in the review card, once as a "Brief".
+    var wasRoutedCommand: Bool {
+        keyPoints.isEmpty
+    }
 }
 
 public extension TaskSuggestion {

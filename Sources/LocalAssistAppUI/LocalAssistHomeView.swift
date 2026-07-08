@@ -154,9 +154,15 @@ public struct LocalAssistHomeView: View {
                             }
                         }
                     )
-                    SummaryResultView(run: run)
-                    if run.summary.source == .foundationModels {
-                        RefineBarView(viewModel: viewModel)
+                    // Routed commands are one card, one story — the review
+                    // card above already says exactly what the Brief would.
+                    // Refine on the same session doesn't apply either: the
+                    // router is a one-turn, one-off session.
+                    if !run.summary.wasRoutedCommand {
+                        SummaryResultView(run: run)
+                        if run.summary.source == .foundationModels {
+                            RefineBarView(viewModel: viewModel)
+                        }
                     }
                 }
             }
