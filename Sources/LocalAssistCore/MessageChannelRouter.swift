@@ -122,9 +122,11 @@ public enum MessageChannelRouter {
         switch channel {
         case .textMessage:
             let digits = phone.map { $0.filter { "+0123456789".contains($0) } } ?? ""
-            let text = [subject, body]
-                .filter { !$0.isEmpty }
-                .joined(separator: "\n")
+            // A text is just the message: leading with the subject line
+            // duplicated the content in the composer ("Sunday brunch with
+            // Priya at 11 am." above "Sunday brunch sounds perfect!…").
+            // The subject only substitutes when there is no body at all.
+            let text = body.isEmpty ? subject : body
             var encoded = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
             // '&' terminates the recipient part of an sms: URL, so it must
             // stay encoded inside the body.

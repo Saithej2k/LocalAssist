@@ -52,6 +52,21 @@ final class LocalAssistMessageRoutingTests: XCTestCase {
         XCTAssertEqual(url.scheme, "sms")
         XCTAssertTrue(url.absoluteString.hasPrefix("sms:+15550102030&body="))
         XCTAssertFalse(url.absoluteString.contains(" "), "sms body must be percent-encoded")
+        XCTAssertFalse(
+            url.absoluteString.contains("Priya"),
+            "a text is just the message — the subject line must not ride above the body"
+        )
+    }
+
+    func testTextMessageHandoffFallsBackToSubjectWhenBodyIsEmpty() throws {
+        let url = try XCTUnwrap(MessageChannelRouter.handoffURL(
+            channel: .textMessage,
+            phone: "+15550102030",
+            email: nil,
+            subject: "Text Priya about Sunday brunch",
+            body: ""
+        ))
+        XCTAssertTrue(url.absoluteString.contains("brunch"), "legacy drafts without a body still carry the subject")
     }
 
     func testEmailHandoffCarriesAddressSubjectAndBody() throws {

@@ -206,86 +206,6 @@ public final class LocalAssistViewModel: ObservableObject {
         }
     }
 
-    private func start(request: AssistantRequest) {
-        generationTask?.cancel()
-        errorMessage = nil
-        isGenerating = true
-        preparedActions = []
-        executedActions = [:]
-        generationPhase = .validating
-        generationMessage = "Starting local generation"
-        streamingPartial = nil
-
-        let useFallback = !usesSmartModel || forceOfflineFallbackForNextRun
-        forceOfflineFallbackForNextRun = false
-
-        generationTask = Task { [weak self] in
-            guard let self else { return }
-            let startedAt = Date()
-            var finalSummary: StructuredSummary?
-
-            do {
-                let stream = await worker.streamSummary(request, forceFallback: useFallback)
-                for try await update in stream {
-                    guard !Task.isCancelled else { return }
-                    self.generationPhase = update.phase
-                    self.generationMessage = update.message
-                    if let partial = update.partial {
-                        self.streamingPartial = partial
-                    }
-                    if let summary = update.summary {
-                        finalSummary = summary
-                        // Deliberately not overwriting `availability` here:
-                        // it tracks the underlying Smart-mode model state
-                        // (for the header pill), not the fallback reason of
-                        // the just-completed run.
-                    }
-                }
-
-                guard let finalSummary else {
-                    throw LocalAssistError.generationDidNotFinish
-                }
-
-                let run = await worker.makeRun(
-                    request: request,
-                    summary: finalSummary,
-                    startedAt: startedAt
-                )
-                let prepared = try await worker.prepareActions(run.summary.actionDrafts)
-                let history = await worker.record(run)
-                guard !Task.isCancelled else { return }
-                self.run = run
-                // Messages/emails to the user's priority people (Settings →
-                // Priority contacts) surface above everything else.
-                self.preparedActions = MessageChannelRouter.prioritized(
-                    prepared,
-                    priorityContacts: MessageChannelRouter.priorityContacts(
-                        fromSetting: UserDefaults.standard.string(forKey: Self.priorityContactsDefaultsKey)
-                            ?? Self.defaultPriorityContacts
-                    )
-                )
-                self.history = history
-                self.isGenerating = false
-                await morningBrief.refresh(history: history)
-                // Re-query the true model state so the header pill and
-                // Settings sheet stay accurate after each run.
-                refreshAvailability()
-            } catch is CancellationError {
-                self.isGenerating = false
-                self.generationMessage = "Cancelled"
-            } catch let failure as GenerationFailure {
-                self.errorMessage = failure.userMessage
-                self.isGenerating = false
-            } catch let error as LocalAssistError {
-                self.errorMessage = error.description
-                self.isGenerating = false
-            } catch {
-                self.errorMessage = error.localizedDescription
-                self.isGenerating = false
-            }
-        }
-    }
-
     /// Flips a task's done-state and persists it into history.
     public func toggleTask(runID: String, task: TaskSuggestion) {
         Task { [weak self] in
@@ -472,6 +392,112 @@ public final class LocalAssistViewModel: ObservableObject {
     Call Mom tonight to check in, text Priya about Sunday brunch, and pick up the birthday cake \
     Saturday morning. Book a dentist appointment for next week and pay the electricity bill by Friday.
     """
+}
+
+// MARK: - Generation run
+
+private extension LocalAssistViewModel {
+    func start(request: AssistantRequest) {
+        generationTask?.cancel()
+        errorMessage = nil
+        isGenerating = true
+        preparedActions = []
+        executedActions = [:]
+        generationPhase = .validating
+        generationMessage = "Starting local generation"
+        streamingPartial = nil
+
+        let useFallback = !usesSmartModel || forceOfflineFallbackForNextRun
+        forceOfflineFallbackForNextRun = false
+
+        generationTask = Task { [weak self] in
+            guard let self else { return }
+            let startedAt = Date()
+
+            do {
+                var finalSummary = try await drain(
+                    await worker.streamSummary(request, forceFallback: useFallback)
+                )
+
+                // The service always ends a run with a summary or a typed
+                // failure, so an empty ending means the stream itself died —
+                // seen on device when the app is suspended mid-generation
+                // and the model connection is torn down. Same policy as
+                // every other failure: the deterministic engine answers.
+                if finalSummary == nil, !useFallback, !Task.isCancelled {
+                    finalSummary = try await drain(
+                        await worker.streamSummary(request, forceFallback: true)
+                    )
+                }
+                guard !Task.isCancelled else { return }
+
+                guard let finalSummary else {
+                    throw LocalAssistError.generationDidNotFinish
+                }
+
+                let run = await worker.makeRun(
+                    request: request,
+                    summary: finalSummary,
+                    startedAt: startedAt
+                )
+                let prepared = try await worker.prepareActions(run.summary.actionDrafts)
+                let history = await worker.record(run)
+                guard !Task.isCancelled else { return }
+                self.run = run
+                // Messages/emails to the user's priority people (Settings →
+                // Priority contacts) surface above everything else.
+                self.preparedActions = MessageChannelRouter.prioritized(
+                    prepared,
+                    priorityContacts: MessageChannelRouter.priorityContacts(
+                        fromSetting: UserDefaults.standard.string(forKey: Self.priorityContactsDefaultsKey)
+                            ?? Self.defaultPriorityContacts
+                    )
+                )
+                self.history = history
+                self.isGenerating = false
+                await morningBrief.refresh(history: history)
+                // Re-query the true model state so the header pill and
+                // Settings sheet stay accurate after each run.
+                refreshAvailability()
+            } catch is CancellationError {
+                self.isGenerating = false
+                self.generationMessage = "Cancelled"
+            } catch let failure as GenerationFailure {
+                self.errorMessage = failure.userMessage
+                self.isGenerating = false
+            } catch let error as LocalAssistError {
+                self.errorMessage = error.description
+                self.isGenerating = false
+            } catch {
+                self.errorMessage = error.localizedDescription
+                self.isGenerating = false
+            }
+        }
+    }
+
+    /// Drains one generation stream into the UI state, returning the final
+    /// summary if the stream produced one. Stops quietly on cancellation —
+    /// the caller decides whether a nil summary is an error.
+    func drain(
+        _ stream: AsyncThrowingStream<SummaryGenerationUpdate, Error>
+    ) async throws -> StructuredSummary? {
+        var finalSummary: StructuredSummary?
+        for try await update in stream {
+            guard !Task.isCancelled else { return finalSummary }
+            generationPhase = update.phase
+            generationMessage = update.message
+            if let partial = update.partial {
+                streamingPartial = partial
+            }
+            if let summary = update.summary {
+                finalSummary = summary
+                // Deliberately not overwriting `availability` here: it
+                // tracks the underlying Smart-mode model state (for the
+                // header pill), not the fallback reason of the run.
+            }
+        }
+        return finalSummary
+    }
 }
 
 public actor LocalAssistWorker {

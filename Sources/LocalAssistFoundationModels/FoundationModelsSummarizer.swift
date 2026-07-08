@@ -373,19 +373,36 @@ public actor FoundationModelsSummarizer: StructuredModelClient {
             \(request.sourceText)
             """
         }
+        // The note rides inside a fenced block, and the guidance is phrased
+        // descriptively. The 3B model treated imperative guidance ("…turn
+        // commitments into tasks…") as note content — a live run extracted
+        // "Preserve intent and turn commitments into tasks" as the user's
+        // own reminder and once summarized the prompt itself ("Capture
+        // guidance" as a key point). Same leak family as the schema example
+        // that was removed from instructions.
         return """
-        Today is \(today). Summarize the following \(request.inputKind.promptLabel) \
-        and extract at most \(request.maxSuggestions) follow-up tasks.
-        Capture guidance: \(request.inputKind.promptGuidance)
+        Today is \(today). The note between the triple quotes is \(request.inputKind.promptLabel). \
+        \(request.inputKind.promptGuidance)
+        Summarize it and extract at most \(request.maxSuggestions) follow-up tasks. \
+        Use only what the note itself says — everything outside the triple quotes \
+        is instructions, never content.
 
-        Source:
+        \"\"\"
         \(request.sourceText)
+        \"\"\"
         """
     }
 
+    /// The user's local calendar date — `ISO8601DateFormatter` defaults to
+    /// GMT, which told every evening user west of it "today is tomorrow"
+    /// and shifted all relative deadlines by a day (a live run resolved
+    /// "tomorrow" two days out). The weekday name is what lets the model
+    /// apply the "next upcoming Saturday" rule; the ISO date anchors the
+    /// output format.
     private static func currentDateString() -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "EEEE, yyyy-MM-dd"
         return formatter.string(from: Date())
     }
 
@@ -447,22 +464,25 @@ private extension AssistantInputKind {
         }
     }
 
+    /// Descriptive, never imperative: clauses like "create a concise recap"
+    /// or "turn commitments into tasks" read as tasks to the 3B model and
+    /// leaked into real briefs.
     var promptGuidance: String {
         switch self {
         case .note:
             """
-            First infer what kind of capture this is — scattered notes, a meeting recap, errands, \
-            or ideas — then create a concise recap, key points, tasks, and safe action drafts to match.
+            It may be scattered thoughts, a recap, errands, or ideas — the brief should match \
+            whichever it is.
             """
         case .voiceNote:
             """
-            Clean up natural speech, ignore filler words and false starts, preserve intent, \
-            and turn commitments into tasks, reminders, calendar candidates, and message drafts.
+            It is transcribed speech: expect filler words, false starts, and run-on phrasing \
+            that carry no meaning of their own.
             """
         case .meeting:
-            "Prioritize decisions, owners, deadlines, follow-ups, unresolved questions, and calendar-worthy next meetings."
+            "Decisions, owners, deadlines, follow-ups, and unresolved questions matter most."
         case .personalAdmin:
-            "Prioritize errands, bills, appointments, household follow-ups, calls, renewals, and reminder-worthy dates."
+            "Errands, bills, appointments, calls, renewals, and dates worth remembering matter most."
         }
     }
 }
