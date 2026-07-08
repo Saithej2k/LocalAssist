@@ -33,31 +33,29 @@ public struct LocalAssistHomeView: View {
 
     public var body: some View {
         TabView(selection: $selectedTab) {
-            captureTab
-                .tabItem {
-                    Label("Home", systemImage: "house.fill")
-                }
-                .tag(AppTab.capture)
+            Tab("Home", systemImage: "house.fill", value: AppTab.capture) {
+                captureTab
+            }
 
-            todayTab
-                .tabItem {
-                    Label("Today", systemImage: "sun.max.fill")
-                }
-                .tag(AppTab.today)
-                .badge(openDueTodayCount)
+            Tab("Today", systemImage: "sun.max.fill", value: AppTab.today) {
+                todayTab
+            }
+            .badge(openDueTodayCount)
 
-            historyTab
-                .tabItem {
-                    Label("History", systemImage: "clock.arrow.circlepath")
-                }
-                .tag(AppTab.history)
+            Tab("History", systemImage: "clock.arrow.circlepath", value: AppTab.history) {
+                historyTab
+            }
 
-            settingsTab
-                .tabItem {
-                    Label("Settings", systemImage: "gearshape.fill")
-                }
-                .tag(AppTab.settings)
+            Tab("Settings", systemImage: "gearshape.fill", value: AppTab.settings) {
+                settingsTab
+            }
         }
+        // The system tab bar condenses to a compact pill while the user
+        // scrolls down and floats back up to full size on scroll-up — the
+        // stock Liquid Glass behavior Safari and Music ship with.
+        #if os(iOS)
+        .tabBarMinimizeBehavior(.onScrollDown)
+        #endif
         .task {
             viewModel.prewarm()
             // Voice prewarm too: asset checks and analyzer setup happen
