@@ -69,6 +69,29 @@ final class LocalAssistMessageRoutingTests: XCTestCase {
         XCTAssertTrue(url.absoluteString.contains("brunch"), "legacy drafts without a body still carry the subject")
     }
 
+    func testTextMessageHandoffEncodesUrlBreakingCharacters() throws {
+        // Every one of these leaks would corrupt the sms: URL: `&` ends the
+        // recipient, `?` opens a query, `+` decodes to a space, `#` starts a
+        // fragment, and a literal `%` looks like an encoding triplet.
+        let url = try XCTUnwrap(MessageChannelRouter.handoffURL(
+            channel: .textMessage,
+            phone: "+15550102030",
+            email: nil,
+            subject: "",
+            body: "Save 50% & use code #BRUNCH?ok+1"
+        ))
+        let string = url.absoluteString
+        // Encoded, exactly once each.
+        XCTAssertTrue(string.contains("%25"), "`%` encoded once")
+        XCTAssertFalse(string.contains("%2525"), "and never twice")
+        XCTAssertTrue(string.contains("%26"), "`&` in body encoded")
+        XCTAssertTrue(string.contains("%23"), "`#` encoded")
+        XCTAssertTrue(string.contains("%3F"), "`?` encoded")
+        XCTAssertTrue(string.contains("%2B"), "`+` encoded")
+        // Structural `&` between the recipient and `body=` is still literal.
+        XCTAssertTrue(string.hasPrefix("sms:+15550102030&body="), "recipient separator survives")
+    }
+
     func testEmailHandoffCarriesAddressSubjectAndBody() throws {
         let url = try XCTUnwrap(MessageChannelRouter.handoffURL(
             channel: .email,

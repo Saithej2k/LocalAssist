@@ -372,12 +372,17 @@ public struct DeterministicCommandRouter: Sendable {
     /// Shared with the reconciler so model-routed actions get the same
     /// priority floor the deterministic router applies.
     static func isHighPriority(_ lowered: String) -> Bool {
-        let words = Set(
+        isHighPriority(words: Set(
             lowered
                 .components(separatedBy: CharacterSet.alphanumerics.inverted)
                 .filter { !$0.isEmpty }
-        )
-        return !words.isDisjoint(with: highPriorityWords)
+        ))
+    }
+
+    /// Overload for callers that already have the word set — the reconciler
+    /// hits this on every action and would otherwise re-tokenize each time.
+    static func isHighPriority(words: Set<String>) -> Bool {
+        !words.isDisjoint(with: highPriorityWords)
     }
 
     // MARK: Summary
@@ -484,11 +489,16 @@ public enum RoutedActionReconciler {
                 .filter { !$0.isEmpty }
         )
         let admissible = admissibleTypes(in: sourceWords, lowered: lowered)
+        // Both are properties of the command; the previous version tokenized
+        // `lowered` again inside `isHighPriority` and inside every action's
+        // date branch. Compute them once at the top.
+        let commandIsHighPriority = DeterministicCommandRouter.isHighPriority(words: sourceWords)
 
         let dateParser = DueDateParser(calendar: calendar)
         let sourceDate = dateParser.date(from: lowered, relativeTo: now)
             .map { LocalAssistDates.dateOnlyString(from: $0, timeZone: calendar.timeZone) }
         let sourceTime = CommandTimeParser.time(in: lowered)
+        let commandDateCues = Set(dateCues.filter { lowered.contains($0) })
 
         // A deferred command's routing clause ("…text this to amma now") is
         // an instruction, not content — a draft that says nothing beyond the
@@ -530,7 +540,7 @@ public enum RoutedActionReconciler {
             // Family and work keywords are a deterministic priority floor —
             // the model may raise priority for its own reasons, never lower
             // it below what the command plainly says.
-            if DeterministicCommandRouter.isHighPriority(lowered) {
+            if commandIsHighPriority {
                 reconciled.priority = .high
             }
             let actionText = "\(action.draftContent) \(action.summary)".lowercased()
@@ -544,7 +554,7 @@ public enum RoutedActionReconciler {
             // meeting) and never count.
             if sourceDate == nil {
                 reconciled.date = ""
-            } else if let cue = dateCues.first(where: { lowered.contains($0) && actionText.contains($0) }),
+            } else if let cue = commandDateCues.first(where: { actionText.contains($0) }),
                       let date = dateParser.date(from: cue, relativeTo: now) {
                 reconciled.date = LocalAssistDates.dateOnlyString(from: date, timeZone: calendar.timeZone)
             } else {

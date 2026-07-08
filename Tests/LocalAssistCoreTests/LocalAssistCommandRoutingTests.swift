@@ -97,6 +97,26 @@ final class LocalAssistCommandRoutingTests: XCTestCase {
         XCTAssertFalse(action.emailSubject.isEmpty)
     }
 
+    func testDeferredCommandSurvivesAbbreviationsInBody() {
+        // A message body with mid-sentence periods ("Dr. Smith", decimals)
+        // trips the naive sentence counter's "one sentence only" rule, so
+        // the deferred pattern still has to catch it — otherwise this input
+        // falls onto the brief path.
+        XCTAssertTrue(DirectCommandDetector.isDirectCommand(
+            "Dr. Smith said the results look good. Text this to mom"
+        ))
+        XCTAssertNotNil(DirectCommandDetector.deferredCommand(
+            in: "Dr. Smith said the results look good. Text this to mom"
+        ))
+        let action = DeterministicCommandRouter(calendar: utcCalendar).route(
+            "Dr. Smith said the results look good. Text this to mom",
+            relativeTo: referenceNow
+        )
+        XCTAssertEqual(action.actionType, .message)
+        XCTAssertEqual(action.contactName, "Mom")
+        XCTAssertTrue(action.draftContent.contains("Dr. Smith"), "the abbreviation stays whole in the message body")
+    }
+
     func testLeadingVerbOutranksDeferredClause() {
         // "remind me to text this to amma" is a reminder about texting,
         // not a text.
@@ -267,6 +287,31 @@ final class LocalAssistCommandReconciliationTests: XCTestCase {
         let reminderDraft = try XCTUnwrap(summary.actionDrafts.last)
         XCTAssertEqual(reminderDraft.kind, .reminder)
         XCTAssertEqual(reminderDraft.payload["title"], "Book a table for Sunday brunch")
+    }
+
+    func testStaticClientRoutedActionsRoundTripPrioritiesThroughTheService() async throws {
+        // The model-side @Generable enum has (.high, .normal); the core enum
+        // has (.low, .medium, .high). This pins the boundary: the
+        // FoundationModels adapter must map .normal → .medium so the review
+        // UI and executor never see a value they don't recognize.
+        let normal = RoutedAction(
+            actionType: .reminder,
+            priority: .medium,
+            contactName: "",
+            date: "",
+            time: "",
+            location: "",
+            draftContent: "Book a table for Sunday brunch",
+            emailSubject: "",
+            summary: "Reminder: book a table"
+        )
+        let service = LocalAssistService(
+            model: StaticStructuredModelClient(routedActions: [normal])
+        )
+        let summary = try await service.summarize(
+            AssistantRequest(sourceText: "remind me to book a table")
+        )
+        XCTAssertEqual(summary.suggestions.first?.priority, .medium)
     }
 
     func testCommandFallsBackToDeterministicRouterWithoutModel() async throws {

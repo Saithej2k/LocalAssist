@@ -127,10 +127,15 @@ public enum MessageChannelRouter {
             // Priya at 11 am." above "Sunday brunch sounds perfect!…").
             // The subject only substitutes when there is no body at all.
             let text = body.isEmpty ? subject : body
-            var encoded = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-            // '&' terminates the recipient part of an sms: URL, so it must
-            // stay encoded inside the body.
-            encoded = encoded.replacingOccurrences(of: "&", with: "%26")
+            // `.urlQueryAllowed` already encodes `%`, `#`, and whitespace,
+            // but leaves three characters intact that corrupt an sms: URL:
+            // `&` terminates the recipient part, `?` opens a query string,
+            // and `+` decodes as a space on the receiver. Encoding `%` or
+            // `#` a second time here would double-escape ("%25" → "%2525").
+            let encoded = (text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")
+                .replacingOccurrences(of: "&", with: "%26")
+                .replacingOccurrences(of: "?", with: "%3F")
+                .replacingOccurrences(of: "+", with: "%2B")
             return URL(string: "sms:\(digits)&body=\(encoded)")
         case .email, .auto:
             var components = URLComponents()

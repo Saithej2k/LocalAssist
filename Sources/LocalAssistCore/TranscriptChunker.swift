@@ -1,16 +1,18 @@
 import Foundation
+import NaturalLanguage
 
 /// Splits long input into sentence-aligned chunks so hour-long meeting notes
 /// fit the on-device model's context window via map-reduce summarization.
 public enum TranscriptChunker {
     /// Greedy sentence packing: each chunk stays under `targetCharacters`
     /// without splitting sentences (oversized sentences are hard-wrapped).
+    ///
+    /// Sentences come from `NLTokenizer` rather than a punctuation split —
+    /// "Dr. Smith mentioned Q3 revenue of $3.14M." stays one sentence
+    /// instead of five fragments, which is what map-reduce chunks need to
+    /// carry coherent meaning between the model's turns.
     public static func chunks(from text: String, targetCharacters: Int = 2800) -> [String] {
-        let sentences = text
-            .components(separatedBy: CharacterSet(charactersIn: ".!?\n"))
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-            .map { $0 + "." }
+        let sentences = detectedSentences(in: text)
 
         guard !sentences.isEmpty else {
             return text.isEmpty ? [] : [text]
@@ -64,6 +66,20 @@ public enum TranscriptChunker {
             })
         }
         return String(lines.joined(separator: "\n").prefix(maxCharacters))
+    }
+
+    private static func detectedSentences(in text: String) -> [String] {
+        let tokenizer = NLTokenizer(unit: .sentence)
+        tokenizer.string = text
+        var sentences: [String] = []
+        tokenizer.enumerateTokens(in: text.startIndex ..< text.endIndex) { range, _ in
+            let sentence = text[range].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !sentence.isEmpty {
+                sentences.append(sentence)
+            }
+            return true
+        }
+        return sentences
     }
 }
 

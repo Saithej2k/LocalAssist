@@ -3,6 +3,12 @@ import Foundation
 public actor RunHistoryStore {
     public nonisolated let fileURL: URL
     public nonisolated let limit: Int
+    /// Decoded runs, newest first. Populated on the first `load` and kept
+    /// in sync by every mutation on this actor. A full brief carries ~2 KB
+    /// of JSON; decoding 50 of them on every append/setTask/aggregate was
+    /// the whole cost of the disk round trip. Actor isolation makes the
+    /// single-writer invariant free.
+    private var cache: [AssistantRun]?
 
     public init(fileURL: URL, limit: Int = 50) {
         self.fileURL = fileURL
@@ -71,6 +77,15 @@ public actor RunHistoryStore {
     }
 
     public func load() throws -> [AssistantRun] {
+        if let cache {
+            return cache
+        }
+        let runs = try loadFromDisk()
+        cache = runs
+        return runs
+    }
+
+    private func loadFromDisk() throws -> [AssistantRun] {
         let signposter = LocalAssistInstrumentation.historySignposter()
         let state = signposter.beginInterval("Load run history")
         defer {
@@ -116,6 +131,7 @@ public actor RunHistoryStore {
             withIntermediateDirectories: true
         )
         try data.write(to: fileURL, options: [.atomic])
+        cache = trimmed
     }
 
     /// Toggles a task's done-state inside a stored run and persists it.
@@ -143,6 +159,7 @@ public actor RunHistoryStore {
         if FileManager.default.fileExists(atPath: fileURL.path) {
             try FileManager.default.removeItem(at: fileURL)
         }
+        cache = []
     }
 
     public func aggregate() throws -> AggregateRunMetrics {
@@ -153,6 +170,7 @@ public actor RunHistoryStore {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return try encoder.encode(runs ?? load())
+        let payload = try runs ?? load()
+        return try encoder.encode(payload)
     }
 }

@@ -129,13 +129,38 @@ public struct DueDateParser: Sendable {
         return nil
     }
 
+    /// `DateFormatter.init` is one of the more expensive Foundation calls,
+    /// and `literalDate` tries up to 4 windows × 14 formats per parse. Each
+    /// `(calendar timezone, format)` pair maps to one formatter, built at
+    /// first use and reused forever. `nonisolated(unsafe)` is fine here:
+    /// the dictionary is only mutated behind `formatterLock`, and each
+    /// formatter is only read after it is stored — the exact single-writer
+    /// / many-reader pattern `SharedContainerCache` already uses.
+    private static let formatterLock = NSLock()
+    private nonisolated(unsafe) static var formatterCache: [FormatterKey: DateFormatter] = [:]
+
+    private struct FormatterKey: Hashable {
+        let timeZoneIdentifier: String
+        let format: String
+    }
+
     private func formatter(_ format: String) -> DateFormatter {
+        let key = FormatterKey(
+            timeZoneIdentifier: calendar.timeZone.identifier,
+            format: format
+        )
+        Self.formatterLock.lock()
+        defer { Self.formatterLock.unlock() }
+        if let cached = Self.formatterCache[key] {
+            return cached
+        }
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = calendar.timeZone
         formatter.dateFormat = format
         formatter.isLenient = false
+        Self.formatterCache[key] = formatter
         return formatter
     }
 
