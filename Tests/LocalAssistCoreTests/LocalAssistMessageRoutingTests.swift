@@ -30,10 +30,12 @@ final class LocalAssistMessageRoutingTests: XCTestCase {
     func testAutoChannelFollowsThePersonalRule() {
         // Saved with a phone number → personal → Messages.
         XCTAssertEqual(MessageChannelRouter.resolve(explicit: .auto, hasPhone: true, hasEmail: true), .textMessage)
-        // Email-only contact → work-shaped → mail.
+        // Email-only contact → mail, the only way to reach them.
         XCTAssertEqual(MessageChannelRouter.resolve(explicit: .auto, hasPhone: false, hasEmail: true), .email)
-        // Unknown person → an unaddressed mail composer beats a text to nobody.
-        XCTAssertEqual(MessageChannelRouter.resolve(explicit: .auto, hasPhone: false, hasEmail: false), .email)
+        // Unknown person → Messages. Mail is only right when the note says
+        // mail — a live run sent "Hi amma" to a Gmail composer under the
+        // old email default.
+        XCTAssertEqual(MessageChannelRouter.resolve(explicit: .auto, hasPhone: false, hasEmail: false), .textMessage)
         // Explicit verbs always win over the contact card.
         XCTAssertEqual(MessageChannelRouter.resolve(explicit: .textMessage, hasPhone: false, hasEmail: true), .textMessage)
         XCTAssertEqual(MessageChannelRouter.resolve(explicit: .email, hasPhone: true, hasEmail: false), .email)
@@ -108,9 +110,11 @@ final class LocalAssistMessageRoutingTests: XCTestCase {
     }
 
     @MainActor
-    func testLegacyDraftsWithoutChannelStillOpenMailComposer() throws {
+    func testLegacyDraftsWithoutChannelOpenMessages() throws {
         // Histories recorded before channels existed have no channel or
-        // recipient keys — they must keep opening the mail composer.
+        // recipient keys — they resolve as `.auto` with nobody matched,
+        // which lands in Messages now that mail is reserved for notes that
+        // say mail.
         let action = PreparedToolAction(
             id: "legacy",
             draft: ToolActionDraft(
@@ -123,7 +127,7 @@ final class LocalAssistMessageRoutingTests: XCTestCase {
             confirmationMessage: "Review before sending"
         )
         let url = try XCTUnwrap(LocalAssistViewModel.draftHandoffURL(for: action))
-        XCTAssertEqual(url.scheme, "mailto")
+        XCTAssertEqual(url.scheme, "sms")
     }
 
     @MainActor

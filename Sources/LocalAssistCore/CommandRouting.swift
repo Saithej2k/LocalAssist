@@ -158,31 +158,76 @@ public enum DirectCommandDetector {
         options: [.caseInsensitive]
     )
 
+    /// The recipient-less tail: "Hi amma how are you? Send this now" names
+    /// nobody in the clause. Anchored to the end of the input so a mid-note
+    /// "send this over after review" never routes — only a command that
+    /// closes the input counts.
+    private static let deferredTailPattern = try? NSRegularExpression(
+        pattern: #"(?:,\s*)?(?:and\s+)?\b(text|send|message|imessage|sms|email|mail)"#
+            + #"\s+(?:this|that|it)"#
+            + #"(?:\s+(?:now|please|asap|today|tonight))*[.!?]?\s*$"#,
+        options: [.caseInsensitive]
+    )
+
+    /// When the clause names nobody, the greeting usually does — "Hi amma"
+    /// is who the message is for.
+    private static let greetingPattern = try? NSRegularExpression(
+        pattern: #"^(?:hi|hey|hello|dear)[\s,]+([a-z]\w*)"#,
+        options: [.caseInsensitive]
+    )
+
     public static func deferredCommand(in text: String) -> DeferredCommand? {
-        guard let deferredPattern else {
-            return nil
-        }
         let range = NSRange(text.startIndex..., in: text)
-        guard let match = deferredPattern.firstMatch(in: text, range: range),
+
+        if let deferredPattern,
+           let match = deferredPattern.firstMatch(in: text, range: range),
+           let clauseRange = Range(match.range, in: text),
+           let verbRange = Range(match.range(at: 1), in: text),
+           let recipientRange = Range(match.range(at: 2), in: text),
+           body(of: text, outside: clauseRange) != nil {
+            return DeferredCommand(
+                type: type(forVerb: text[verbRange]),
+                recipient: String(text[recipientRange]),
+                clauseRange: clauseRange
+            )
+        }
+
+        guard let deferredTailPattern,
+              let match = deferredTailPattern.firstMatch(in: text, range: range),
               let clauseRange = Range(match.range, in: text),
               let verbRange = Range(match.range(at: 1), in: text),
-              let recipientRange = Range(match.range(at: 2), in: text)
+              let body = body(of: text, outside: clauseRange)
         else {
             return nil
         }
-        // A deferred command needs content to defer to — the clause alone
-        // ("send this to mom") has no message and stays a prefix command.
-        let remainder = text.replacingCharacters(in: clauseRange, with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !remainder.isEmpty else {
-            return nil
+
+        var recipient = ""
+        if let greetingPattern,
+           let greeting = greetingPattern.firstMatch(
+               in: body,
+               range: NSRange(body.startIndex..., in: body)
+           ),
+           let nameRange = Range(greeting.range(at: 1), in: body) {
+            recipient = String(body[nameRange])
         }
-        let verb = text[verbRange].lowercased()
         return DeferredCommand(
-            type: verb == "email" || verb == "mail" ? .email : .message,
-            recipient: String(text[recipientRange]),
+            type: type(forVerb: text[verbRange]),
+            recipient: recipient,
             clauseRange: clauseRange
         )
+    }
+
+    /// A deferred command needs content to defer to — the clause alone
+    /// ("send this to mom") has no message and stays a prefix command.
+    private static func body(of text: String, outside clauseRange: Range<String.Index>) -> String? {
+        let remainder = text.replacingCharacters(in: clauseRange, with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return remainder.isEmpty ? nil : remainder
+    }
+
+    private static func type(forVerb verb: Substring) -> RoutedActionType {
+        let lowered = verb.lowercased()
+        return lowered == "email" || lowered == "mail" ? .email : .message
     }
 }
 
@@ -504,8 +549,11 @@ public enum RoutedActionReconciler {
         // an instruction, not content — a draft that says nothing beyond the
         // clause is the clause echoed back as a second action.
         let clauseWords = DirectCommandDetector.deferredCommand(in: sourceText).map { deferred in
-            contentWords(in: String(sourceText[deferred.clauseRange]))
-                .union([deferred.recipient.lowercased()])
+            var words = contentWords(in: String(sourceText[deferred.clauseRange]))
+            if !deferred.recipient.isEmpty {
+                words.insert(deferred.recipient.lowercased())
+            }
+            return words
         }
 
         // Model actions sometimes duplicate on any of three axes: identical

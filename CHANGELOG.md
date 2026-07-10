@@ -20,6 +20,14 @@ All notable changes to LocalAssist are documented here.
   down.
 
 ### Engine
+- "Hi amma how are you? Send this now" routes as a message: a deferred
+  command no longer needs "to X" when the clause closes the input, and
+  the greeting names the recipient the clause left out. Mid-note "send
+  this over…" prose still never routes.
+- Mail only when the note says mail: an unresolved recipient on an
+  `auto` channel now opens Messages, not the mail composer. A phone
+  number still means Messages and an email-only contact still means
+  mail; only the nobody-matched default flipped.
 - The model can now see the user's open reminders before proposing
   tasks: a read-only `RemindersLookupTool` lists incomplete reminders
   (optionally filtered by keyword, dated ones first) so a note that

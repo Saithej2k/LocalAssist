@@ -91,10 +91,14 @@ public enum MessageChannelRouter {
 
     // MARK: - Settling `.auto` from the contact card
 
-    /// The user's rule: personal contacts get a text, everyone else gets an
-    /// email. "Personal" is operationalized as "saved with a phone number".
-    /// Unknown people default to email — a composer with a blank To: field
-    /// beats a text message to nobody.
+    /// The user's rule: mail only when the note says mail. Explicit verbs
+    /// win outright; for everyone else a phone number means Messages, an
+    /// email-only contact means mail (the only way to reach them), and an
+    /// unresolved person means Messages too — a live run sent "Hi amma" to
+    /// a Gmail composer because the old default was email, and nobody
+    /// texts their mother by mail. Both composers open unaddressed when
+    /// nobody resolved, so the default costs nothing and matches how
+    /// people actually reach each other.
     public static func resolve(explicit: MessageChannel, hasPhone: Bool, hasEmail: Bool) -> MessageChannel {
         switch explicit {
         case .textMessage, .email:
@@ -103,7 +107,10 @@ public enum MessageChannelRouter {
             if hasPhone {
                 return .textMessage
             }
-            return .email
+            if hasEmail {
+                return .email
+            }
+            return .textMessage
         }
     }
 

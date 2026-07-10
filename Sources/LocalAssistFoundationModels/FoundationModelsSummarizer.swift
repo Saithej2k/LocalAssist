@@ -216,6 +216,7 @@ public actor FoundationModelsSummarizer: StructuredModelClient {
         "remind me to pick up groceries" → reminder
         "remind me to finish the presentation" → reminder
         "hi amma how are you doing, text this to amma now" → message
+        "hi amma how are you? send this now" → message
         "the report is ready for review, email this to the team" → email
 
         Most commands are exactly ONE action. Only extract a second action \
