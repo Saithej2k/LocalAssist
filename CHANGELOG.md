@@ -5,6 +5,11 @@ All notable changes to LocalAssist are documented here.
 ## Unreleased
 
 ### Product
+- Settings grows a read-only Diagnostics section: the current model
+  session's transcript — instructions, prompts, tool calls, tool
+  outputs, responses, in order, each truncated for display — so tool
+  behavior is inspectable on the phone without a debugger. Everything
+  stays on device.
 - The brief streams in its own final layout: the headline lands at full
   title size, task rows render with their real priority dot and pills
   (placeholder-redacted until each field arrives), and completion is the

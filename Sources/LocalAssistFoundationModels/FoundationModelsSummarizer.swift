@@ -526,3 +526,75 @@ public enum LocalAssistLiveFactory {
         LocalAssistService(model: makeSummarizer(tools: tools))
     }
 }
+
+// MARK: - Diagnostics
+
+extension FoundationModelsSummarizer {
+    /// Flattens the shared session's transcript — instructions, prompts,
+    /// tool calls, tool outputs, responses, in order — into display
+    /// snapshots. Foundation Models types stop here, the same boundary rule
+    /// the failure taxonomy follows: the UI receives value types only, so
+    /// tool behavior is inspectable without another module importing the
+    /// framework. Empty until the first Smart turn creates a session.
+    public func transcriptSnapshot() -> [TranscriptEntrySnapshot] {
+        guard let session else {
+            return []
+        }
+        return session.transcript.enumerated().map { index, entry in
+            TranscriptEntrySnapshot(
+                id: index,
+                kind: Self.snapshotKind(for: entry),
+                rawText: Self.displayText(for: entry)
+            )
+        }
+    }
+
+    private static func snapshotKind(for entry: Transcript.Entry) -> TranscriptEntrySnapshot.Kind {
+        switch entry {
+        case .instructions:
+            .instructions
+        case .prompt:
+            .prompt
+        case .toolCalls:
+            .toolCalls
+        case .toolOutput:
+            .toolOutput
+        case .response:
+            .response
+        @unknown default:
+            .response
+        }
+    }
+
+    private static func displayText(for entry: Transcript.Entry) -> String {
+        switch entry {
+        case .instructions(let instructions):
+            text(from: instructions.segments)
+        case .prompt(let prompt):
+            text(from: prompt.segments)
+        case .toolCalls(let calls):
+            calls.map { "\($0.toolName)(\(String(describing: $0.arguments)))" }
+                .joined(separator: "; ")
+        case .toolOutput(let output):
+            text(from: output.segments)
+        case .response(let response):
+            text(from: response.segments)
+        @unknown default:
+            String(describing: entry)
+        }
+    }
+
+    private static func text(from segments: [Transcript.Segment]) -> String {
+        segments.map { segment in
+            switch segment {
+            case .text(let textSegment):
+                textSegment.content
+            case .structure(let structured):
+                String(describing: structured.content)
+            @unknown default:
+                String(describing: segment)
+            }
+        }
+        .joined(separator: " ")
+    }
+}

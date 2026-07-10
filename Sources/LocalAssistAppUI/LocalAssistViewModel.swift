@@ -328,6 +328,12 @@ public final class LocalAssistViewModel: ObservableObject {
         }
     }
 
+    /// Read-only transcript of the shared model session for the Settings
+    /// diagnostics view.
+    public func transcriptDiagnostics() async -> [TranscriptEntrySnapshot] {
+        await worker.transcriptDiagnostics()
+    }
+
     /// Writes both history exports to temporary files for the share sheet:
     /// JSON is the app's exact history format, Markdown is human-readable.
     /// Files share far better than raw strings — AirDrop, Save to Files,
@@ -730,5 +736,11 @@ public actor LocalAssistWorker {
     public func clearHistory() async {
         try? await store()?.clear()
         await summarizer.resetConversation()
+    }
+
+    /// Read-only transcript of the shared model session for the Settings
+    /// diagnostics view — value types only, mapped at the adapter boundary.
+    public func transcriptDiagnostics() async -> [TranscriptEntrySnapshot] {
+        await summarizer.transcriptSnapshot()
     }
 }

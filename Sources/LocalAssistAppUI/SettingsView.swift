@@ -7,6 +7,8 @@ struct SettingsFormView: View {
     /// history changes, not on every Form render.
     @State private var markdownExportURL: URL?
     @State private var jsonExportURL: URL?
+    @State private var transcriptEntries: [TranscriptEntrySnapshot] = []
+    @State private var transcriptExpanded = false
     @AppStorage(LocalAssistViewModel.priorityContactsDefaultsKey)
     private var priorityContacts = LocalAssistViewModel.defaultPriorityContacts
 
@@ -96,6 +98,37 @@ struct SettingsFormView: View {
             }
 
             Section {
+                DisclosureGroup(isExpanded: $transcriptExpanded) {
+                    if transcriptEntries.isEmpty {
+                        Text("No model session yet — run a Smart brief first.")
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(transcriptEntries) { entry in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(entry.kind.displayTitle)
+                                    .font(.system(.caption, design: .rounded, weight: .bold))
+                                    .foregroundStyle(.secondary)
+                                Text(entry.text)
+                                    .font(.system(.caption, design: .rounded))
+                                    .textSelection(.enabled)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                } label: {
+                    Label("Model session transcript", systemImage: "list.bullet.rectangle")
+                }
+            } header: {
+                Text("Diagnostics")
+            } footer: {
+                Text(
+                    "Read-only view of the current model session — instructions, prompts, "
+                        + "tool calls, and responses, each truncated for display. Stays on this phone."
+                )
+            }
+
+            Section {
             } footer: {
                 Text("LocalAssist \(Self.versionString) — everything on this device.")
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -106,6 +139,25 @@ struct SettingsFormView: View {
         }
         .onChange(of: viewModel.history) { _, _ in
             refreshExports()
+        }
+        // The transcript loads when the group opens and again after each
+        // run — sessions grow per turn and rebuild on context overflow, so
+        // a cached copy would quietly go stale.
+        .onChange(of: transcriptExpanded) { _, expanded in
+            if expanded {
+                refreshTranscript()
+            }
+        }
+        .onChange(of: viewModel.run) { _, _ in
+            if transcriptExpanded {
+                refreshTranscript()
+            }
+        }
+    }
+
+    private func refreshTranscript() {
+        Task {
+            transcriptEntries = await viewModel.transcriptDiagnostics()
         }
     }
 
