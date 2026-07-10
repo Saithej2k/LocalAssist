@@ -55,12 +55,13 @@ The engine details that matter:
 | --- | --- |
 | Guided generation | `@Generable`/`@Guide` `DailyBrief` contract with `streamResponse(generating:)` — the framework's constrained decoding guarantees schema conformance, so there is no JSON-repair path anywhere in the app |
 | Typed streaming | `PartiallyGenerated` snapshots map to typed partials; the headline renders within the first tokens while tasks are still generating |
-| Session lifecycle | One `LanguageModelSession` reused across turns, prewarmed on demand, schema included on the first turn and dropped from repeats, overlapping requests isolated |
+| Session lifecycle | One `LanguageModelSession` per conversation — a new capture starts clean so nothing leaks from the last one, refine turns share the session, and prewarm (at launch and on the first keystroke) loads both the brief session and a ready routing session before Generate is tapped |
 | Context management | Rolling-window transcript compression (`ConversationMemory`); on projected or actual overflow the session is rebuilt with a condensed digest and retried |
-| Tool calling | `CalendarAvailabilityTool` reads real free/busy from EventKit so scheduling suggestions land in open slots; `ContactsLookupTool` resolves first names in notes to real contacts (both Foundation Models `Tool`s) |
+| Tool calling | Three Foundation Models `Tool`s: `CalendarAvailabilityTool` reads real free/busy so scheduling lands in open slots, `RemindersLookupTool` lists open reminders so the model never proposes a duplicate task, and `ContactsLookupTool` resolves first names to real people |
 | Error taxonomy | Every `GenerationError` and `UnavailableReason` maps to a typed `GenerationFailure`; the deterministic fallback keeps every capture producing a brief, with the exact reason preserved in diagnostics |
 | Due dates | The model resolves relative deadlines to ISO-8601 dates; a deterministic parser handles the rules path and confirmed writes |
-| Direct-command routing | Short commands ("text Priya that Sunday brunch works, 11am") skip the brief: a few-shot `@Generable` router classifies message/email/event/reminder, extracts recipient + date + time, and writes the message draft at parse time — the card opens the composer with exactly what the user reviewed. A regex router covers devices without the model |
+| Direct-command routing | Commands skip the brief: a few-shot `@Generable` router (greedy sampling — same command, same route) classifies message/email/event/reminder, extracts recipient + date + time, and drafts the message at parse time. Deferred shapes route too ("Hi amma how are you? Send this now" — the greeting names the recipient), and a multi-line dump partitions: command lines become one card each, the rest goes through the brief extractor, nothing vanishes. A regex router is the floor on every device |
+| Model output reconciliation | Every routed action passes deterministic checks earned from live failures: grounding against the command's own words, verb admissibility, clause-echo and duplicate collapse, and dates/times/locations that exist only when the command contains them — the model proposes, the rules engine disposes |
 
 ## System integration
 
@@ -72,6 +73,7 @@ The engine details that matter:
 - **Task loop** — check tasks off in the Today view; done-state persists, feeds the widget, and shows up in the morning brief ("3 due today · 1 already done").
 - **Interactive snippet confirmation** — reminder creation from Siri/Spotlight shows a preview card and writes only after confirmation; confirmed message drafts open a real pre-filled composer.
 - **Morning brief** — an opt-in, fully local notification each morning, with read-aloud available in-app via on-device voices.
+- **Diagnostics on the phone** — Settings shows the current model session's transcript read-only (instructions, prompts, tool calls, responses), so tool behavior is inspectable without a debugger. Stays on device.
 
 ## Getting started
 
@@ -101,7 +103,7 @@ Verification is deterministic and CI-gated — no LLM judges, no flaky assertion
 | --- | --- | --- |
 | `swift test` (135) | Fallback policy, error taxonomy, typed streaming order, map-reduce chunking, task completion persistence, cancellation, concurrency, due-date parsing, local-day due-date policy, capture-kind inference, direct-command detection and routing, routed-action reconciliation, sms handoff encoding, tool calls, executor writes, conversation memory, legacy decode, eval scorers | ✅ |
 | `localassist-selftest` (47) | End-to-end scenario checks runnable on any machine | ✅ |
-| `localassist-eval` | Task recall, due-date accuracy, action mapping, structure compliance, hallucination probes over a fixed dataset; dated reports in [docs/evals](docs/evals); CI fails below 0.9 | ✅ 1.00 |
+| `localassist-eval` | Task recall, due-date accuracy, action mapping, structure compliance, hallucination probes over a fixed dataset; dated reports in [docs/evals](docs/evals); CI gates the deterministic path below 0.9, and the live on-device model's committed baseline is 0.89 | ✅ 1.00 (deterministic) |
 | `localassist-bench` | p50–p99 latency, throughput, peak memory, fallback rate, cancellation timing; baselines in [docs/performance](docs/performance) | ✅ |
 | `localassist-speecheval` | End-to-end speech: every eval case is spoken by the system synthesizer, transcribed through the app's SpeechAnalyzer stack, scored for word error rate, and run through the task pipeline next to a text baseline — recognition errors surface as the task-accuracy cost they cause | ✅ 0.07 WER |
 | XCUITest smoke | Real-UI flow on a simulator: offline auto-run produces an action review, all four tabs navigate | ✅ |
@@ -115,10 +117,10 @@ Profiling: `OSSignposter` intervals cover every pipeline stage. See [docs/instru
 | --- | --- |
 | `LocalAssistCore` | Platform-agnostic engine: validation, typed partials, failure taxonomy, normalization, deterministic fallback, due-date parsing, conversation memory, action seams, history, metrics |
 | `LocalAssistFoundationModels` | On-device adapter: `DailyBrief` contract and the `FoundationModelsSummarizer` actor |
-| `LocalAssistSystemTools` | EventKit calendar free/busy tool, Contacts lookup tool, and `SystemActionExecutor` for confirmed writes |
+| `LocalAssistSystemTools` | EventKit calendar free/busy, open-reminders, and Contacts lookup tools + `SystemActionExecutor` for confirmed writes |
 | `LocalAssistAppIntents` | App Entities, App Shortcuts, capture intent, snippet-confirmed reminder intent |
 | `LocalAssistAppUI` | Liquid Glass tabbed surface (Home · Today · History · Settings), single self-classifying input, voice transcription, Action Review, morning brief |
 | `LocalAssistEvalKit` + `localassist-eval` | Eval dataset, scorers, reports, CI gate |
-| `LocalAssistCLI` / `LocalAssistBenchmarks` / `localassist-selftest` | Demo CLI, performance harness, and machine-independent end-to-end checks |
+| `LocalAssistCLI` / `LocalAssistBenchmarks` / `localassist-selftest` / `localassist-speecheval` | Demo CLI, performance harness, machine-independent end-to-end checks, and the TTS→ASR→tasks speech accuracy harness |
 
 A point-by-point implementation map lives in [docs/apple-readiness.md](docs/apple-readiness.md).
