@@ -167,10 +167,17 @@ public actor FoundationModelsSummarizer: StructuredModelClient {
 
         do {
             let session = LanguageModelSession(model: model, instructions: Self.routingInstructions())
+            // Greedy sampling here, default everywhere else. Routing is
+            // single-turn classification — the same command should route
+            // the same way every run, and live evals should measure the
+            // prompt, not the dice. The brief stream and composeMessage
+            // keep default sampling on purpose: two phrasings of the same
+            // message draft are variety, two routings of the same command
+            // are a bug.
             let response = try await session.respond(
                 to: request.sourceText,
                 generating: RoutedCommandPlan.self,
-                options: GenerationOptions()
+                options: GenerationOptions(sampling: .greedy)
             )
             return response.content.actions.map(\.coreAction)
         } catch let error as LanguageModelSession.GenerationError {
