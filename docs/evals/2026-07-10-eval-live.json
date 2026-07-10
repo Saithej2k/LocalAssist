@@ -1,0 +1,123 @@
+{
+  "caseResults" : [
+    {
+      "actionAccuracy" : 1,
+      "caseID" : "blockers-message",
+      "composite" : 0.85,
+      "dueHintAccuracy" : 0,
+      "hallucinationFree" : 1,
+      "latencyMilliseconds" : 12672.278125,
+      "notes" : [
+        "due hint mismatch for Send Mira blockers: 2026-07-10",
+        "due hint mismatch for Schedule design sync: 2026-07-15"
+      ],
+      "source" : "foundationModels",
+      "structureScore" : 1,
+      "taskRecall" : 1
+    },
+    {
+      "actionAccuracy" : 1,
+      "caseID" : "urgent-deadline",
+      "composite" : 0.85,
+      "dueHintAccuracy" : 0,
+      "hallucinationFree" : 1,
+      "latencyMilliseconds" : 22811.299791,
+      "notes" : [
+        "due hint mismatch for Email finance draft numbers tomorrow: 2026-07-11T00:00:00"
+      ],
+      "source" : "foundationModels",
+      "structureScore" : 1,
+      "taskRecall" : 1
+    },
+    {
+      "actionAccuracy" : 1,
+      "caseID" : "checklist-update",
+      "composite" : 1,
+      "dueHintAccuracy" : 1,
+      "hallucinationFree" : 1,
+      "latencyMilliseconds" : 4222.288667,
+      "notes" : [
+
+      ],
+      "source" : "foundationModels",
+      "structureScore" : 1,
+      "taskRecall" : 1
+    },
+    {
+      "actionAccuracy" : 1,
+      "caseID" : "meeting-notes",
+      "composite" : 0.85,
+      "dueHintAccuracy" : 0,
+      "hallucinationFree" : 1,
+      "latencyMilliseconds" : 5183.476583,
+      "notes" : [
+        "due hint mismatch for Book War Room for Thursday: 2026-07-15"
+      ],
+      "source" : "foundationModels",
+      "structureScore" : 1,
+      "taskRecall" : 1
+    },
+    {
+      "actionAccuracy" : 1,
+      "caseID" : "single-task",
+      "composite" : 0.85,
+      "dueHintAccuracy" : 0,
+      "hallucinationFree" : 1,
+      "latencyMilliseconds" : 2517.8794589999998,
+      "notes" : [
+        "due hint mismatch for Call Vendor: 2026-07-10T00:00:00"
+      ],
+      "source" : "foundationModels",
+      "structureScore" : 1,
+      "taskRecall" : 1
+    },
+    {
+      "actionAccuracy" : 1,
+      "caseID" : "bullet-list",
+      "composite" : 0.85,
+      "dueHintAccuracy" : 0,
+      "hallucinationFree" : 1,
+      "latencyMilliseconds" : 3911.654458,
+      "notes" : [
+        "due hint mismatch for Send the beta invite email on Monday: 2026-07-12"
+      ],
+      "source" : "foundationModels",
+      "structureScore" : 1,
+      "taskRecall" : 1
+    },
+    {
+      "actionAccuracy" : 1,
+      "caseID" : "no-deadline",
+      "composite" : 1,
+      "dueHintAccuracy" : 1,
+      "hallucinationFree" : 1,
+      "latencyMilliseconds" : 3196.707,
+      "notes" : [
+
+      ],
+      "source" : "foundationModels",
+      "structureScore" : 1,
+      "taskRecall" : 1
+    },
+    {
+      "actionAccuracy" : 1,
+      "caseID" : "mixed-noise",
+      "composite" : 0.85,
+      "dueHintAccuracy" : 0,
+      "hallucinationFree" : 1,
+      "latencyMilliseconds" : 4643.820167,
+      "notes" : [
+        "due hint mismatch for Ship the hotfix build tonight: 2026-07-11T23:59:59Z"
+      ],
+      "source" : "foundationModels",
+      "structureScore" : 1,
+      "taskRecall" : 1
+    }
+  ],
+  "completedAt" : "2026-07-10T16:46:41Z",
+  "configurationLabel" : "foundation-models (live on-device)",
+  "meanComposite" : 0.8875,
+  "meanLatencyMilliseconds" : 7394.925531250001,
+  "minComposite" : 0.85,
+  "startedAt" : "2026-07-10T16:45:42Z"
+}

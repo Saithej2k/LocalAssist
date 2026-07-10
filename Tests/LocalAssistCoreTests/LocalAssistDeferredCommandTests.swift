@@ -100,10 +100,12 @@ final class LocalAssistDeferredCommandTests: XCTestCase {
         XCTAssertNil(DirectCommandDetector.deferredCommand(in: "Send this now"))
     }
 
-    func testCommandLinesAcceptsOnlyAllCommandDumps() {
-        // Reproduces a live run: four commands dumped one per line came
-        // back as a brief that dropped two of them.
-        let dump = """
+    func testPartitionedDumpSeparatesCommandsFromCapture() {
+        // Reproduces two live runs: four commands dumped one per line came
+        // back as a brief that dropped two of them, and later one capture
+        // sentence in the dump sank all four commands under the old
+        // all-or-nothing rule.
+        let allCommands = """
         text amma that Sunday brunch works, 11am at the usual place
 
         email HR about leave next week
@@ -112,15 +114,60 @@ final class LocalAssistDeferredCommandTests: XCTestCase {
 
         remind me to call mom tomorrow
         """
-        XCTAssertEqual(DirectCommandDetector.commandLines(in: dump)?.count, 4)
+        let pure = DirectCommandDetector.partitionedDump(in: allCommands)
+        XCTAssertEqual(pure?.commandLines.count, 4)
+        XCTAssertEqual(pure?.captureText, "")
 
-        // One brief-shaped line and the whole capture stays a capture.
-        XCTAssertNil(DirectCommandDetector.commandLines(in: """
+        let mixed = DirectCommandDetector.partitionedDump(in: """
         text amma that brunch works
+        Call Mom tonight, pick up the birthday cake Saturday, and book the dentist for next week.
+        """)
+        XCTAssertEqual(mixed?.commandLines, ["text amma that brunch works"])
+        XCTAssertEqual(
+            mixed?.captureText,
+            "Call Mom tonight, pick up the birthday cake Saturday, and book the dentist for next week."
+        )
+
+        // No command lines at all → a plain note for the brief path.
+        XCTAssertNil(DirectCommandDetector.partitionedDump(in: """
         the quarterly numbers came in better than expected
+        marketing wants a follow-up deck
         """))
         // A single command is the single-command path, not a batch.
-        XCTAssertNil(DirectCommandDetector.commandLines(in: "text amma that brunch works"))
+        XCTAssertNil(DirectCommandDetector.partitionedDump(in: "text amma that brunch works"))
+    }
+
+    func testMixedDumpKeepsEveryCommandAndExtractsTheCapture() async throws {
+        // The screenshot case: four commands plus one errand sentence must
+        // produce the four routed cards AND the errand tasks — nothing
+        // vanishes because a capture line rode along.
+        let service = LocalAssistService()
+        let summary = try await service.summarize(AssistantRequest(sourceText: """
+        text Priya that Sunday brunch works, 11am at the usual place
+
+        email HR about leave next week
+
+        meeting with Rahul Thursday 3pm
+
+        remind me to call mom tomorrow
+
+        Call Mom tonight, pick up the birthday cake Saturday, and book the dentist for next week.
+        """))
+
+        XCTAssertEqual(summary.source, .deterministicFallback)
+        let kinds = summary.actionDrafts.map(\.kind)
+        XCTAssertEqual(
+            Array(kinds.prefix(4)),
+            [.messageDraft, .messageDraft, .calendarHold, .reminder],
+            "the four command cards come first, in dump order"
+        )
+        XCTAssertGreaterThanOrEqual(
+            summary.suggestions.count, 6,
+            "the capture sentence contributes its own extracted tasks"
+        )
+        let titles = summary.suggestions.map(\.title).joined(separator: " | ").lowercased()
+        XCTAssertTrue(titles.contains("priya"), titles)
+        XCTAssertTrue(titles.contains("cake"), titles)
     }
 
     func testDeferredCommandSurvivesAbbreviationsInBody() {

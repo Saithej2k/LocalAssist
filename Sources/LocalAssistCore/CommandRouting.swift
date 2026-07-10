@@ -140,21 +140,37 @@ public enum DirectCommandDetector {
         return deferredCommand(in: trimmed) != nil
     }
 
-    /// A dump of one command per line — "text amma…", blank line, "email
-    /// HR…", "meeting with Rahul…" — is a batch, not a note. Every
-    /// non-empty line must independently be a direct command; one
-    /// brief-shaped line and the whole capture stays a capture, because a
-    /// note that merely contains a command line deserves the brief's
-    /// full-context read.
-    public static func commandLines(in text: String) -> [String]? {
+    /// A multi-line dump split into what routes and what summarizes. The
+    /// whole point of the box is dumping thoughts and getting each one
+    /// sorted — a live dump of four commands plus one errand sentence lost
+    /// two commands because the old all-or-nothing rule sent everything to
+    /// the brief. Now command lines route individually and the remaining
+    /// lines stay a capture for the brief extractor; nil when the dump has
+    /// no command lines at all (a plain note) or fewer than two lines (the
+    /// single-command path handles that).
+    public struct PartitionedDump: Equatable, Sendable {
+        public var commandLines: [String]
+        /// Non-command lines, in order, for one brief-extraction pass.
+        public var captureText: String
+    }
+
+    public static func partitionedDump(in text: String) -> PartitionedDump? {
         let lines = text
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-        guard lines.count >= 2, lines.allSatisfy({ isDirectCommand($0) }) else {
+        guard lines.count >= 2 else {
             return nil
         }
-        return lines
+        let commands = lines.filter { isDirectCommand($0) }
+        guard !commands.isEmpty else {
+            return nil
+        }
+        let capture = lines.filter { !isDirectCommand($0) }
+        return PartitionedDump(
+            commandLines: commands,
+            captureText: capture.joined(separator: "\n")
+        )
     }
 
     /// The routed order for a deferred command: the message body is the

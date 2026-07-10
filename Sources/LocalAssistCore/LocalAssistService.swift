@@ -106,14 +106,16 @@ public struct LocalAssistService: Sendable {
 
         // Direct commands ("text Priya that brunch works") skip the brief
         // entirely: the deliverable is a routed, addressed action card, not
-        // a headline with key points. A dump of one command per line routes
-        // line by line — the whole point of the box is dumping thoughts and
-        // getting each one sorted. Refinements stay on the brief path —
-        // they are instructions about an existing summary.
+        // a headline with key points. A multi-line dump partitions — command
+        // lines route line by line, the remaining lines go once through the
+        // brief extractor, and every card lands in the same review list;
+        // the whole point of the box is dumping thoughts and getting each
+        // one sorted. Refinements stay on the brief path — they are
+        // instructions about an existing summary.
         if !validated.isRefinement {
-            if let lines = DirectCommandDetector.commandLines(in: validated.sourceText) {
+            if let dump = DirectCommandDetector.partitionedDump(in: validated.sourceText) {
                 return try await routeCommandBatch(
-                    lines,
+                    dump,
                     request: validated,
                     emit: emit,
                     signposter: signposter
@@ -494,18 +496,22 @@ private extension LocalAssistService {
         return summary
     }
 
-    /// One command per line, one card per command. Each line routes exactly
-    /// like a single command — model when available, reconciled against
-    /// that line, deterministic router on any failure — so a line can never
-    /// vanish: the rules engine is the floor for every line individually.
-    /// Cards accumulate into the streaming partial as lines finish, so a
-    /// four-command dump shows its first card while the fourth still routes.
+    /// One command per line, one card per command — and one brief-extractor
+    /// pass over whatever lines were not commands, so a dump can mix "text
+    /// Priya…" with "Call Mom tonight, pick up the cake Saturday" and lose
+    /// nothing. Each command line routes exactly like a single command —
+    /// model when available, reconciled against that line, deterministic
+    /// router on any failure — so a line can never vanish: the rules engine
+    /// is the floor for every line individually. Cards accumulate into the
+    /// streaming partial as lines finish, so a four-command dump shows its
+    /// first card while the fourth still routes.
     func routeCommandBatch(
-        _ lines: [String],
+        _ dump: DirectCommandDetector.PartitionedDump,
         request: AssistantRequest,
         emit: @Sendable (SummaryGenerationUpdate) -> Void,
         signposter: OSSignposter
     ) async throws -> StructuredSummary {
+        let lines = dump.commandLines
         let batchState = signposter.beginInterval("Route command batch")
         defer {
             signposter.endInterval("Route command batch", batchState)
@@ -520,15 +526,77 @@ private extension LocalAssistService {
         }
         try Task.checkCancellation()
 
-        var actions: [RoutedAction] = []
-        var anyModelRouted = false
-        var fallbackReasons: [String] = []
+        let routed = try await routeLines(
+            lines,
+            request: request,
+            availability: availability,
+            emit: emit
+        )
+        let actions = routed.actions
+        let anyModelRouted = routed.usedModel
+        var fallbackReasons = routed.failureNotes
 
+        if !dump.captureText.isEmpty {
+            emit(.init(
+                phase: availability.isAvailable ? .streamingModel : .fallback,
+                partial: Self.routedPartial(from: actions),
+                message: "Sorting the rest of the note"
+            ))
+        }
+        let capture = try await extractCaptureLines(
+            from: dump,
+            request: request,
+            emit: emit,
+            signposter: signposter
+        )
+        if let failureNote = capture.failureNote {
+            fallbackReasons.append(failureNote)
+        }
+
+        var summary = RoutedActionMapper.summary(
+            from: Array(actions.prefix(max(request.maxSuggestions, lines.count))),
+            source: (anyModelRouted || capture.usedModel) ? .foundationModels : .deterministicFallback,
+            diagnostics: GenerationDiagnostics(
+                availability: availability,
+                fallbackReason: fallbackReasons.isEmpty ? nil : fallbackReasons.joined(separator: " | ")
+            )
+        )
+        summary.suggestions.append(contentsOf: capture.suggestions)
+        summary.actionDrafts.append(contentsOf: capture.drafts)
+        if summary.suggestions.count > 1 {
+            summary.overview = "\(summary.suggestions.count) actions ready to review"
+        }
+        emit(.init(
+            phase: .completed,
+            summary: summary,
+            message: anyModelRouted || capture.usedModel
+                ? "Sorted \(summary.suggestions.count) actions with Foundation Models"
+                : "Sorted \(summary.suggestions.count) actions with deterministic rules"
+        ))
+        return summary
+    }
+
+    struct RoutedLines {
+        var actions: [RoutedAction] = []
+        var usedModel = false
+        var failureNotes: [String] = []
+    }
+
+    /// Each command line routes like a single command — model when
+    /// available, reconciled against that line, deterministic router on
+    /// any failure — so a line can never vanish.
+    func routeLines(
+        _ lines: [String],
+        request: AssistantRequest,
+        availability: ModelAvailability,
+        emit: @Sendable (SummaryGenerationUpdate) -> Void
+    ) async throws -> RoutedLines {
+        var routed = RoutedLines()
         for (index, line) in lines.enumerated() {
             try Task.checkCancellation()
             emit(.init(
                 phase: availability.isAvailable ? .streamingModel : .fallback,
-                partial: Self.routedPartial(from: actions),
+                partial: Self.routedPartial(from: routed.actions),
                 message: "Routing command \(index + 1) of \(lines.count)"
             ))
 
@@ -542,38 +610,66 @@ private extension LocalAssistService {
             var lineActions: [RoutedAction] = []
             if let model, availability.isAvailable {
                 do {
-                    if let routed = try await model.routeCommand(for: lineRequest) {
-                        lineActions = RoutedActionReconciler.reconciled(routed, sourceText: line)
-                        anyModelRouted = anyModelRouted || !lineActions.isEmpty
+                    if let modelActions = try await model.routeCommand(for: lineRequest) {
+                        lineActions = RoutedActionReconciler.reconciled(modelActions, sourceText: line)
+                        routed.usedModel = routed.usedModel || !lineActions.isEmpty
                     }
                 } catch is CancellationError {
                     throw CancellationError()
                 } catch {
-                    fallbackReasons.append("Line \(index + 1): \(String(describing: error))")
+                    routed.failureNotes.append("Line \(index + 1): \(String(describing: error))")
                 }
             }
             if lineActions.isEmpty {
                 lineActions = [DeterministicCommandRouter().route(line)]
             }
-            actions.append(contentsOf: lineActions)
+            routed.actions.append(contentsOf: lineActions)
         }
+        return routed
+    }
 
-        let summary = RoutedActionMapper.summary(
-            from: Array(actions.prefix(max(request.maxSuggestions, lines.count))),
-            source: anyModelRouted ? .foundationModels : .deterministicFallback,
-            diagnostics: GenerationDiagnostics(
-                availability: availability,
-                fallbackReason: fallbackReasons.isEmpty ? nil : fallbackReasons.joined(separator: " | ")
+    struct CaptureExtraction {
+        var suggestions: [TaskSuggestion] = []
+        var drafts: [ToolActionDraft] = []
+        var usedModel = false
+        var failureNote: String?
+    }
+
+    /// The lines that were not commands get one brief-extraction pass — the
+    /// same engine a plain capture would hit — and their cards join the
+    /// routed ones. A failure here must not sink the commands that already
+    /// routed, so it degrades to a diagnostic note.
+    func extractCaptureLines(
+        from dump: DirectCommandDetector.PartitionedDump,
+        request: AssistantRequest,
+        emit: @Sendable (SummaryGenerationUpdate) -> Void,
+        signposter: OSSignposter
+    ) async throws -> CaptureExtraction {
+        guard !dump.captureText.isEmpty else {
+            return CaptureExtraction()
+        }
+        do {
+            let captureSummary = try await singlePass(
+                AssistantRequest(
+                    sourceText: dump.captureText,
+                    localeIdentifier: request.localeIdentifier,
+                    maxSuggestions: request.maxSuggestions,
+                    inputKind: request.inputKind
+                ),
+                emit: emit,
+                publishUpdates: false,
+                signposter: signposter
             )
-        )
-        emit(.init(
-            phase: .completed,
-            summary: summary,
-            message: anyModelRouted
-                ? "Routed \(lines.count) commands with Foundation Models"
-                : "Routed \(lines.count) commands with deterministic rules"
-        ))
-        return summary
+            return CaptureExtraction(
+                suggestions: captureSummary.suggestions,
+                drafts: captureSummary.actionDrafts,
+                usedModel: captureSummary.source == .foundationModels
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            return CaptureExtraction(failureNote: "Capture lines: \(String(describing: error))")
+        }
     }
 
     /// The accumulated cards as a streaming partial, so the progress panel
