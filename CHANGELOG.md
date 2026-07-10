@@ -4,6 +4,16 @@ All notable changes to LocalAssist are documented here.
 
 ## Unreleased
 
+### Product
+- The brief streams in its own final layout: the headline lands at full
+  title size, task rows render with their real priority dot and pills
+  (placeholder-redacted until each field arrives), and completion is the
+  same card finishing in place instead of a caption-sized skeleton
+  swapping into a different one. The phase line sits where the finished
+  card's engine-and-latency line goes, and streaming rows keep stable
+  slot identity so mid-stream revisions update text without tearing rows
+  down.
+
 ### Engine
 - Deferred commands route too: "Hi amma how are you doing, text this to
   amma now" puts the message first and the verb last — the router now
