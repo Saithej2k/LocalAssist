@@ -20,6 +20,13 @@ All notable changes to LocalAssist are documented here.
   down.
 
 ### Engine
+- Routed commands answer faster: the routing session is prewarmed at
+  launch and on typing instead of built cold at tap time, so a command
+  no longer pays instructions processing while the user watches for the
+  card. Each command consumes the warmed session (single-turn — its
+  transcript must not carry into the next command), a replacement warms
+  immediately, and a session warmed before midnight is rebuilt when the
+  date it was told changes.
 - "Hi amma how are you? Send this now" routes as a message: a deferred
   command no longer needs "to X" when the clause closes the input, and
   the greeting names the recipient the clause left out. Mid-note "send
