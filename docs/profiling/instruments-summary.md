@@ -23,6 +23,25 @@ This document records the project-level Instruments result used by the resume bu
 
 The repo now includes `project.yml`/`LocalAssist.xcodeproj`, the iOS app target, and simulator screenshots. The source-level signposts above are checked into the project so the Xcode Instruments run is reproducible on a full Apple development environment.
 
+## What this record does not capture
+
+Stated plainly so the numbers are read for what they are: a before/after
+comparison from one profiling session, not a distribution study.
+
+- The exact input texts exercised were not recorded; the session predates
+  the fixed eval dataset in `LocalAssistEvalKit`.
+- The number of repeated runs behind each percentile was not recorded —
+  "several repeated runs" is what the session notes say.
+- The warm/cold mix was not recorded. Prewarm existed at the time, so the
+  session was likely mixed, but that is inference, not record.
+- The device was not recorded in this document. Foundation Models does not
+  run in the simulator, so it was real hardware.
+
+A future re-run should pin all four: the eval dataset as the input set, a
+fixed run count per scenario, an explicit cold-first-then-warm protocol,
+and the device with thermal state — the voice-capture logs already show
+how (`thermal=`, `lowPower=` per session).
+
 ## Before And After
 
 | Scenario | Before | After |
