@@ -1,0 +1,31 @@
+{
+  "cancellationMilliseconds" : 0.027667,
+  "cancellationSucceeded" : true,
+  "completedAt" : "2026-07-10T21:06:04Z",
+  "configuration" : {
+    "cancelAfterMS" : 25,
+    "concurrency" : 4,
+    "iterations" : 100,
+    "warmupIterations" : 5
+  },
+  "failureCount" : 0,
+  "fallbackRate" : 1,
+  "latencyMilliseconds" : {
+    "count" : 100,
+    "maximum" : 21.187334,
+    "mean" : 20.39394004,
+    "minimum" : 19.438,
+    "p50" : 20.420833,
+    "p75" : 20.601375,
+    "p90" : 20.789625,
+    "p95" : 20.8875,
+    "p99" : 21.101667,
+    "standardDeviation" : 0.33214301963738196
+  },
+  "peakMemoryDeltaMB" : 0.65625,
+  "peakMemoryMB" : 12.234375,
+  "startedAt" : "2026-07-10T21:06:03Z",
+  "successCount" : 100,
+  "throughputPerSecond" : 194.32633521901843,
+  "totalDurationMilliseconds" : 514.598291
+}
