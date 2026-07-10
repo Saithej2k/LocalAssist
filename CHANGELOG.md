@@ -34,6 +34,17 @@ All notable changes to LocalAssist are documented here.
   down.
 
 ### Engine
+- The speech experience is now measured end to end:
+  `localassist-speecheval` speaks every eval case with the system
+  synthesizer, transcribes it back through the same SpeechAnalyzer
+  stack the mic uses, scores word error rate against the spoken
+  reference, and runs the transcript through the task pipeline next to
+  a text-input baseline — so recognition errors surface as the
+  downstream task-accuracy cost they actually cause. First baseline:
+  mean WER 0.07, speech task composite 0.93 against a 1.00 text
+  ceiling, with name recognition ("Mira" heard as "mirror") the
+  dominant cost. Reports are dated into docs/evals with the
+  synthetic-audio caveat printed on each one.
 - Routed commands answer faster: the routing session is prewarmed at
   launch and on typing instead of built cold at tap time, so a command
   no longer pays instructions processing while the user watches for the

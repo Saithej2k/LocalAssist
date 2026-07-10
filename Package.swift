@@ -21,7 +21,8 @@ let package = Package(
         .executable(name: "localassist", targets: ["LocalAssistCLI"]),
         .executable(name: "localassist-bench", targets: ["LocalAssistBenchmarks"]),
         .executable(name: "localassist-selftest", targets: ["LocalAssistSelfTests"]),
-        .executable(name: "localassist-eval", targets: ["LocalAssistEvals"])
+        .executable(name: "localassist-eval", targets: ["LocalAssistEvals"]),
+        .executable(name: "localassist-speecheval", targets: ["LocalAssistSpeechEval"])
     ],
     targets: [
         .target(name: "LocalAssistCore"),
@@ -70,6 +71,14 @@ let package = Package(
         ),
         .executableTarget(
             name: "LocalAssistEvals",
+            dependencies: [
+                "LocalAssistCore",
+                "LocalAssistEvalKit",
+                "LocalAssistFoundationModels"
+            ]
+        ),
+        .executableTarget(
+            name: "LocalAssistSpeechEval",
             dependencies: [
                 "LocalAssistCore",
                 "LocalAssistEvalKit",

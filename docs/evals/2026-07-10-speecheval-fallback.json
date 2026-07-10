@@ -1,0 +1,103 @@
+{
+  "caseResults" : [
+    {
+      "asrMilliseconds" : 611.630792,
+      "caseID" : "blockers-message",
+      "deletions" : 0,
+      "insertions" : 0,
+      "speechComposite" : 0.8833333333333333,
+      "substitutions" : 2,
+      "synthMilliseconds" : 1338.4115,
+      "textComposite" : 1,
+      "transcript" : "Review the onboarding dock, send mirror the blockers by Friday, and schedule a design sync next week.",
+      "wordErrorRate" : 0.11764705882352941
+    },
+    {
+      "asrMilliseconds" : 164.287209,
+      "caseID" : "urgent-deadline",
+      "deletions" : 0,
+      "insertions" : 0,
+      "speechComposite" : 1,
+      "substitutions" : 0,
+      "synthMilliseconds" : 296.090625,
+      "textComposite" : 1,
+      "transcript" : "Finish the quarterly report ASAP, email finance the draft numbers tomorrow.",
+      "wordErrorRate" : 0
+    },
+    {
+      "asrMilliseconds" : 177.317083,
+      "caseID" : "checklist-update",
+      "deletions" : 0,
+      "insertions" : 0,
+      "speechComposite" : 1,
+      "substitutions" : 0,
+      "synthMilliseconds" : 298.726125,
+      "textComposite" : 1,
+      "transcript" : "Update the launch checklist before the beta ships. Add the new QA steps and check the crash dashboards.",
+      "wordErrorRate" : 0
+    },
+    {
+      "asrMilliseconds" : 268.952083,
+      "caseID" : "meeting-notes",
+      "deletions" : 0,
+      "insertions" : 1,
+      "speechComposite" : 1,
+      "substitutions" : 6,
+      "synthMilliseconds" : 323.18,
+      "textComposite" : 1,
+      "transcript" : "Stand-up notes. Infromigration is blocked on the off token rollout. Priya will share the run book. Book a war room for Thursday and follow up with the platform team.",
+      "wordErrorRate" : 0.2413793103448276
+    },
+    {
+      "asrMilliseconds" : 125.007209,
+      "caseID" : "single-task",
+      "deletions" : 0,
+      "insertions" : 0,
+      "speechComposite" : 1,
+      "substitutions" : 0,
+      "synthMilliseconds" : 283.427083,
+      "textComposite" : 1,
+      "transcript" : "Call the vendor about the renewed contract terms today.",
+      "wordErrorRate" : 0
+    },
+    {
+      "asrMilliseconds" : 184.535041,
+      "caseID" : "bullet-list",
+      "deletions" : 0,
+      "insertions" : 0,
+      "speechComposite" : 0.7666666666666666,
+      "substitutions" : 2,
+      "synthMilliseconds" : 299.3535,
+      "textComposite" : 1,
+      "transcript" : "Draft release notes for 2.4 cent of beta invite email on Monday Review, open crash reports.",
+      "wordErrorRate" : 0.11764705882352941
+    },
+    {
+      "asrMilliseconds" : 163.318416,
+      "caseID" : "no-deadline",
+      "deletions" : 0,
+      "insertions" : 0,
+      "speechComposite" : 1,
+      "substitutions" : 0,
+      "synthMilliseconds" : 295.172542,
+      "textComposite" : 1,
+      "transcript" : "Prepare interview questions for the platform engineer role and share them with the panel.",
+      "wordErrorRate" : 0
+    },
+    {
+      "asrMilliseconds" : 208.547125,
+      "caseID" : "mixed-noise",
+      "deletions" : 0,
+      "insertions" : 1,
+      "speechComposite" : 0.825,
+      "substitutions" : 1,
+      "synthMilliseconds" : 318.514375,
+      "textComposite" : 1,
+      "transcript" : "Lunch was great. Weather is nice. Ship the hot fix build tonight and confirm the rollout with Dana. Maybe we should think about the offsite sometime.",
+      "wordErrorRate" : 0.08
+    }
+  ],
+  "completedAt" : "2026-07-10T16:17:58Z",
+  "configurationLabel" : "speech + deterministic-fallback",
+  "startedAt" : "2026-07-10T16:17:55Z"
+}

@@ -79,11 +79,12 @@ The engine details that matter:
 # Full Xcode toolchain required: plain CommandLineTools builds but silently skips XCTest.
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 
-swift test                              # 128 tests
+swift test                              # 134 tests
 swift run localassist-selftest          # 47 end-to-end checks
 swift run localassist-eval --min-score 0.9
 swift run localassist --text "Call Mom tonight, pick up the birthday cake Saturday, and book the dentist for next week." --plain
 swift run localassist-bench --iterations 100 --warmup 5 --concurrency 4
+swift run localassist-speecheval --output docs/evals   # TTS→ASR→tasks round trip
 
 # iOS app
 xcodegen generate
@@ -98,10 +99,11 @@ Verification is deterministic and CI-gated — no LLM judges, no flaky assertion
 
 | Check | What it covers | Status |
 | --- | --- | --- |
-| `swift test` (128) | Fallback policy, error taxonomy, typed streaming order, map-reduce chunking, task completion persistence, cancellation, concurrency, due-date parsing, local-day due-date policy, capture-kind inference, direct-command detection and routing, routed-action reconciliation, sms handoff encoding, tool calls, executor writes, conversation memory, legacy decode, eval scorers | ✅ |
+| `swift test` (134) | Fallback policy, error taxonomy, typed streaming order, map-reduce chunking, task completion persistence, cancellation, concurrency, due-date parsing, local-day due-date policy, capture-kind inference, direct-command detection and routing, routed-action reconciliation, sms handoff encoding, tool calls, executor writes, conversation memory, legacy decode, eval scorers | ✅ |
 | `localassist-selftest` (47) | End-to-end scenario checks runnable on any machine | ✅ |
 | `localassist-eval` | Task recall, due-date accuracy, action mapping, structure compliance, hallucination probes over a fixed dataset; dated reports in [docs/evals](docs/evals); CI fails below 0.9 | ✅ 1.00 |
 | `localassist-bench` | p50–p99 latency, throughput, peak memory, fallback rate, cancellation timing; baselines in [docs/performance](docs/performance) | ✅ |
+| `localassist-speecheval` | End-to-end speech: every eval case is spoken by the system synthesizer, transcribed through the app's SpeechAnalyzer stack, scored for word error rate, and run through the task pipeline next to a text baseline — recognition errors surface as the task-accuracy cost they cause | ✅ 0.07 WER |
 | XCUITest smoke | Real-UI flow on a simulator: offline auto-run produces an action review, all four tabs navigate | ✅ |
 | SwiftLint | Style and correctness lints on every push | ✅ |
 
