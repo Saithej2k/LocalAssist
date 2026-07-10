@@ -206,6 +206,7 @@ public enum LocalAssistToolkit {
         var tools: [any FoundationModels.Tool] = []
         #if canImport(EventKit)
             tools.append(CalendarAvailabilityTool(provider: EventKitFreeBusyProvider(), counter: counter))
+            tools.append(RemindersLookupTool(provider: EventKitReminderProvider(), counter: counter))
         #endif
         #if canImport(Contacts)
             tools.append(ContactsLookupTool(resolver: ContactsFrameworkResolver(), counter: counter))
@@ -213,14 +214,21 @@ public enum LocalAssistToolkit {
         return tools.isEmpty ? sampleTools(counter: counter) : tools
     }
 
-    /// Seeded in-memory agenda and contacts for previews, screenshots, and
-    /// platforms without EventKit.
+    /// Seeded in-memory agenda, reminders, and contacts for previews,
+    /// screenshots, and platforms without EventKit.
     public static func sampleTools(
         counter: ToolInvocationCounter? = nil,
         agendaStore: SampleAgendaStore = .seeded()
     ) -> [any FoundationModels.Tool] {
         [
             CalendarAvailabilityTool(provider: agendaStore, counter: counter),
+            RemindersLookupTool(
+                provider: StaticReminderProvider(reminders: [
+                    OpenReminder(title: "Pick up groceries"),
+                    OpenReminder(title: "Renew car insurance"),
+                ]),
+                counter: counter
+            ),
             ContactsLookupTool(
                 resolver: StaticContactResolver(contacts: [
                     ResolvedContact(displayName: "Mira Chen", hasEmail: true, hasPhone: true),

@@ -15,6 +15,13 @@ All notable changes to LocalAssist are documented here.
   down.
 
 ### Engine
+- The model can now see the user's open reminders before proposing
+  tasks: a read-only `RemindersLookupTool` lists incomplete reminders
+  (optionally filtered by keyword, dated ones first) so a note that
+  mentions the dentist defers to an existing "Book the dentist" instead
+  of duplicating it. Same seam pattern as the calendar and contacts
+  tools — EventKit-backed live, static provider for tests and previews,
+  access requested on first call, denial surfaces as a typed tool error.
 - Deferred commands route too: "Hi amma how are you doing, text this to
   amma now" puts the message first and the verb last — the router now
   recognizes "text/send/email this to X" anywhere in a short input and

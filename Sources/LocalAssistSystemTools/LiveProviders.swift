@@ -21,6 +21,45 @@ import LocalAssistCore
         }
     }
 
+    /// Live EventKit-backed open-reminder lookup. Same access pattern as the
+    /// free/busy provider: reminders permission is requested on the first
+    /// tool call, and a denial surfaces as a typed error the service treats
+    /// as a tool failure — never a crash.
+    public final class EventKitReminderProvider: ReminderLookupProviding, @unchecked Sendable {
+        private let store = EKEventStore()
+
+        public init() {}
+
+        public func openReminders() async throws -> [OpenReminder] {
+            guard try await store.requestFullAccessToReminders() else {
+                throw SystemAccessError.remindersAccessDenied
+            }
+
+            let predicate = store.predicateForIncompleteReminders(
+                withDueDateStarting: nil,
+                ending: nil,
+                calendars: nil
+            )
+            // EKReminder is not Sendable, so the mapping happens inside the
+            // fetch callback and only the value-type results cross the
+            // continuation boundary.
+            return await withCheckedContinuation { continuation in
+                store.fetchReminders(matching: predicate) { fetched in
+                    let open = (fetched ?? []).compactMap { reminder -> OpenReminder? in
+                        guard let title = reminder.title, !title.isEmpty else {
+                            return nil
+                        }
+                        return OpenReminder(
+                            title: title,
+                            dueDate: reminder.dueDateComponents.flatMap { Calendar.current.date(from: $0) }
+                        )
+                    }
+                    continuation.resume(returning: open)
+                }
+            }
+        }
+    }
+
     /// Live EventKit-backed free/busy lookup. `EKEventStore` is documented
     /// thread-safe, hence the `@unchecked Sendable` wrapper.
     public final class EventKitFreeBusyProvider: FreeBusyProviding, @unchecked Sendable {
