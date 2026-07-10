@@ -30,7 +30,16 @@ public struct RequestValidator: Sendable {
     }
 
     public func validate(_ request: AssistantRequest) throws -> AssistantRequest {
-        let trimmedText = request.sourceText.normalizedWhitespace()
+        // Whitespace collapses within lines, never across them: line breaks
+        // are meaning. A dump of one command per line reached the router as
+        // a single mushed line because this used to run
+        // `normalizedWhitespace()` over the whole text — the batch detector
+        // never saw the lines that were plainly there.
+        let trimmedText = request.sourceText
+            .components(separatedBy: .newlines)
+            .map { $0.normalizedWhitespace() }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !trimmedText.isEmpty else {
             throw LocalAssistError.emptyInput

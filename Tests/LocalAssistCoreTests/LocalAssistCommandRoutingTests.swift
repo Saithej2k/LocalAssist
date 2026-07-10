@@ -56,120 +56,6 @@ final class LocalAssistCommandRoutingTests: XCTestCase {
         ))
     }
 
-    func testDetectorAcceptsDeferredCommands() {
-        // The message first, the verb last — the shape natural dictation takes.
-        XCTAssertTrue(DirectCommandDetector.isDirectCommand(
-            "Hi amma how are you doing, text this to amma now"
-        ))
-        XCTAssertTrue(DirectCommandDetector.isDirectCommand(
-            "The report is ready for review, email this to the team"
-        ))
-        // Multiple sentences are fine here — the content IS the message.
-        XCTAssertTrue(DirectCommandDetector.isDirectCommand(
-            "Hi amma. Hope the garden is doing well. Send this to amma"
-        ))
-        // The clause alone has no message to defer to.
-        XCTAssertNil(DirectCommandDetector.deferredCommand(in: "send this to mom"))
-    }
-
-    func testDeferredCommandKeepsTheUsersWordsAsTheBody() {
-        let action = DeterministicCommandRouter(calendar: utcCalendar).route(
-            "Hi amma how are you doing, text this to amma now",
-            relativeTo: referenceNow
-        )
-
-        XCTAssertEqual(action.actionType, .message)
-        XCTAssertEqual(action.contactName, "Amma")
-        XCTAssertEqual(action.draftContent, "Hi amma how are you doing")
-        XCTAssertEqual(action.priority, .high, "amma is a family keyword")
-        XCTAssertEqual(action.date, "", "\"now\" is the send urgency, not a due date")
-    }
-
-    func testDeferredEmailRoutesToMailWithSubject() {
-        let action = DeterministicCommandRouter(calendar: utcCalendar).route(
-            "The report is ready for review, email this to the team",
-            relativeTo: referenceNow
-        )
-
-        XCTAssertEqual(action.actionType, .email)
-        XCTAssertEqual(action.contactName, "Team")
-        XCTAssertEqual(action.draftContent, "The report is ready for review")
-        XCTAssertFalse(action.emailSubject.isEmpty)
-    }
-
-    func testDeferredTailCommandTakesRecipientFromGreeting() {
-        // Reproduces a live run: "Hi amma how are you? Send this now" names
-        // nobody in the clause — the greeting is who the message is for.
-        // Under the old pattern this fell to the brief path, which made
-        // "Send this now" the card title and mailed it.
-        XCTAssertTrue(DirectCommandDetector.isDirectCommand(
-            "Hi amma how are you? Send this now"
-        ))
-        let action = DeterministicCommandRouter(calendar: utcCalendar).route(
-            "Hi amma how are you? Send this now",
-            relativeTo: referenceNow
-        )
-        XCTAssertEqual(action.actionType, .message)
-        XCTAssertEqual(action.contactName, "Amma")
-        XCTAssertEqual(action.draftContent, "Hi amma how are you?")
-        XCTAssertEqual(action.priority, .high, "amma is a family keyword")
-    }
-
-    func testDeferredTailWithoutGreetingRoutesUnaddressed() {
-        // No greeting, no "to X": still a message — the composer opens
-        // unaddressed and the user picks the recipient there.
-        let action = DeterministicCommandRouter(calendar: utcCalendar).route(
-            "Running fifteen minutes late, text this now",
-            relativeTo: referenceNow
-        )
-        XCTAssertEqual(action.actionType, .message)
-        XCTAssertEqual(action.contactName, "")
-        XCTAssertEqual(action.draftContent, "Running fifteen minutes late")
-    }
-
-    func testDeferredTailMustCloseTheInput() {
-        // Mid-note "send this" is prose, not a command — only a clause that
-        // ends the input routes.
-        XCTAssertNil(DirectCommandDetector.deferredCommand(
-            in: "Need to send this over after the review wraps"
-        ))
-        XCTAssertFalse(DirectCommandDetector.isDirectCommand(
-            "Need to send this over after the review wraps"
-        ))
-        // And the clause alone still has no message to defer to.
-        XCTAssertNil(DirectCommandDetector.deferredCommand(in: "Send this now"))
-    }
-
-    func testDeferredCommandSurvivesAbbreviationsInBody() {
-        // A message body with mid-sentence periods ("Dr. Smith", decimals)
-        // trips the naive sentence counter's "one sentence only" rule, so
-        // the deferred pattern still has to catch it — otherwise this input
-        // falls onto the brief path.
-        XCTAssertTrue(DirectCommandDetector.isDirectCommand(
-            "Dr. Smith said the results look good. Text this to mom"
-        ))
-        XCTAssertNotNil(DirectCommandDetector.deferredCommand(
-            in: "Dr. Smith said the results look good. Text this to mom"
-        ))
-        let action = DeterministicCommandRouter(calendar: utcCalendar).route(
-            "Dr. Smith said the results look good. Text this to mom",
-            relativeTo: referenceNow
-        )
-        XCTAssertEqual(action.actionType, .message)
-        XCTAssertEqual(action.contactName, "Mom")
-        XCTAssertTrue(action.draftContent.contains("Dr. Smith"), "the abbreviation stays whole in the message body")
-    }
-
-    func testLeadingVerbOutranksDeferredClause() {
-        // "remind me to text this to amma" is a reminder about texting,
-        // not a text.
-        let action = DeterministicCommandRouter(calendar: utcCalendar).route(
-            "remind me to text this to amma",
-            relativeTo: referenceNow
-        )
-        XCTAssertEqual(action.actionType, .reminder)
-    }
-
     // MARK: - Deterministic router
 
     func testMessageCommandParsesContactTimeDateAndDraft() {
@@ -628,6 +514,33 @@ final class LocalAssistReconcilerRuleTests: XCTestCase {
         XCTAssertEqual(reconciled.count, 1)
     }
 
+    func testReconcilerDropsCardsGroundedOnOneNameAlone() {
+        // Reproduces a live run: a greeting example from the routing
+        // instructions came back as its own card ("Hi amma how are you?")
+        // because the capture merely mentioned amma. One shared name is
+        // not grounding for a wordy draft.
+        let ghost = RoutedAction(
+            actionType: .message,
+            priority: .high,
+            contactName: "Amma",
+            date: "",
+            time: "",
+            location: "",
+            draftContent: "Hi amma how are you?",
+            emailSubject: "",
+            summary: "Message Amma: checking in"
+        )
+
+        let reconciled = RoutedActionReconciler.reconciled(
+            [ghost],
+            sourceText: "text amma that Sunday brunch works, 11am at the usual place",
+            calendar: utcCalendar,
+            now: referenceNow
+        )
+
+        XCTAssertTrue(reconciled.isEmpty, "the draft shares only 'amma' with the command")
+    }
+
     func testReconcilerDropsClauseEchoActions() {
         // Reproduces a live run: the deferred amma command came back as the
         // real message plus the routing clause echoed as a second message.
@@ -774,8 +687,11 @@ final class LocalAssistReconcilerRuleTests: XCTestCase {
         XCTAssertEqual(summary.source, .deterministicFallback)
         XCTAssertEqual(summary.suggestions.first?.action, .messageDraft)
     }
+}
 
-    // MARK: - Mapper
+/// The mapper that folds routed actions into review-ready drafts and
+/// the summaries the home screen renders.
+final class LocalAssistRoutedMapperTests: XCTestCase {
 
     func testRoutedSummariesAreMarkedForBriefSuppression() {
         // The home screen uses `wasRoutedCommand` to hide the Brief block

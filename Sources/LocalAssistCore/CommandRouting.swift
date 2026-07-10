@@ -140,6 +140,23 @@ public enum DirectCommandDetector {
         return deferredCommand(in: trimmed) != nil
     }
 
+    /// A dump of one command per line — "text amma…", blank line, "email
+    /// HR…", "meeting with Rahul…" — is a batch, not a note. Every
+    /// non-empty line must independently be a direct command; one
+    /// brief-shaped line and the whole capture stays a capture, because a
+    /// note that merely contains a command line deserves the brief's
+    /// full-context read.
+    public static func commandLines(in text: String) -> [String]? {
+        let lines = text
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard lines.count >= 2, lines.allSatisfy({ isDirectCommand($0) }) else {
+            return nil
+        }
+        return lines
+    }
+
     /// The routed order for a deferred command: the message body is the
     /// user's own words with the routing clause removed.
     public struct DeferredCommand: Equatable, Sendable {
@@ -689,15 +706,23 @@ public enum RoutedActionReconciler {
     ]
 
     private static func isGrounded(_ action: RoutedAction, in sourceWords: Set<String>) -> Bool {
-        let actionWords = contentWords(
-            in: "\(action.contactName) \(action.draftContent) \(action.summary) \(action.location)"
-        )
+        // Grounding reads the contact and the draft — what the action would
+        // actually do — not the summary label or the location: "Event:" and
+        // an invented "Meeting Room" are the model's own words, and judging
+        // them against the command sank legitimate actions.
+        let actionWords = contentWords(in: "\(action.contactName) \(action.draftContent)")
         // An action with no content words of its own can't be judged;
         // keep it and let the user's review be the filter.
         guard !actionWords.isEmpty else {
             return true
         }
-        return !actionWords.isDisjoint(with: sourceWords)
+        // One shared word is not grounding: a fabricated "hi amma how are
+        // you" card slipped through on "amma" alone when a capture merely
+        // mentioned her. A wordy action must share at least two content
+        // words with the command; a one- or two-word action still only
+        // needs what it has.
+        let required = min(2, actionWords.count)
+        return actionWords.intersection(sourceWords).count >= required
     }
 
     private static func contentWords(in text: String) -> Set<String> {

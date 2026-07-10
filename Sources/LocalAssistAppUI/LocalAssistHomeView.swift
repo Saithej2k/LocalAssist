@@ -384,6 +384,7 @@ private struct ModelModePill: View {
 private struct InputComposerView: View {
     @ObservedObject var viewModel: LocalAssistViewModel
     @ObservedObject var voiceTranscriber: VoiceNoteTranscriber
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     #if os(iOS)
         @State private var isEditorFocused = false
         @State private var scanRequestCount = 0
@@ -398,16 +399,18 @@ private struct InputComposerView: View {
         VStack(alignment: .leading, spacing: 14) {
             ZStack(alignment: .topLeading) {
                 #if os(iOS)
+                    // Height comes from the text itself (sizeThatFits in
+                    // CaptureTextView) — no fixed frame, no interior scroll
+                    // until the cap.
                     CaptureTextView(
                         text: $viewModel.inputText,
                         isFocused: $isEditorFocused,
                         scanRequestCount: $scanRequestCount
                     )
-                    .frame(minHeight: 170)
                 #else
                     TextEditor(text: $viewModel.inputText)
                         .font(.system(.body, design: .rounded))
-                        .frame(minHeight: 170)
+                        .frame(minHeight: 170, maxHeight: 340)
                         .padding(12)
                         .scrollContentBackground(.hidden)
                         .focused($editorFocused)
@@ -427,6 +430,12 @@ private struct InputComposerView: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(LocalAssistColors.border.opacity(0.6))
             }
+            // The card's growth eases instead of jumping a line at a time,
+            // unless the user asked the system for less motion.
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: 0.18),
+                value: viewModel.inputText
+            )
             // One-tap clear, right where the text is — not buried in Settings.
             .overlay(alignment: .topTrailing) {
                 if !viewModel.inputText.isEmpty {

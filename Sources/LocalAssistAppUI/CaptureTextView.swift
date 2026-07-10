@@ -30,6 +30,13 @@
             Coordinator(self)
         }
 
+        /// The editor grows with its text instead of scrolling inside a
+        /// fixed pill: a non-scrolling UITextView reports its content as
+        /// intrinsic size, so the card expands line by line until the cap,
+        /// and only then turns interior scrolling on.
+        static let minimumHeight: CGFloat = 170
+        static let maximumHeight: CGFloat = 340
+
         func makeUIView(context: Context) -> UITextView {
             let view = UITextView()
             view.delegate = context.coordinator
@@ -39,7 +46,27 @@
             view.textContainerInset = UIEdgeInsets(top: 20, left: 12, bottom: 20, right: 12)
             view.keyboardDismissMode = .interactive
             view.inputAccessoryView = context.coordinator.makeAccessoryToolbar()
+            view.isScrollEnabled = false
             return view
+        }
+
+        func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+            guard let width = proposal.width, width.isFinite, width > 0 else {
+                return nil
+            }
+            let fitted = uiView.sizeThatFits(
+                CGSize(width: width, height: .greatestFiniteMagnitude)
+            ).height
+            // Interior scrolling exists only past the cap — below it the
+            // card is exactly as tall as the text.
+            let shouldScroll = fitted > Self.maximumHeight
+            if uiView.isScrollEnabled != shouldScroll {
+                uiView.isScrollEnabled = shouldScroll
+            }
+            return CGSize(
+                width: width,
+                height: min(max(fitted, Self.minimumHeight), Self.maximumHeight)
+            )
         }
 
         func updateUIView(_ view: UITextView, context: Context) {

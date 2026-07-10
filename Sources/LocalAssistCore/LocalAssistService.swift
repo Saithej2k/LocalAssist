@@ -106,11 +106,22 @@ public struct LocalAssistService: Sendable {
 
         // Direct commands ("text Priya that brunch works") skip the brief
         // entirely: the deliverable is a routed, addressed action card, not
-        // a headline with key points. Refinements stay on the brief path —
+        // a headline with key points. A dump of one command per line routes
+        // line by line — the whole point of the box is dumping thoughts and
+        // getting each one sorted. Refinements stay on the brief path —
         // they are instructions about an existing summary.
-        if !validated.isRefinement,
-           DirectCommandDetector.isDirectCommand(validated.sourceText) {
-            return try await routeDirectCommand(validated, emit: emit, signposter: signposter)
+        if !validated.isRefinement {
+            if let lines = DirectCommandDetector.commandLines(in: validated.sourceText) {
+                return try await routeCommandBatch(
+                    lines,
+                    request: validated,
+                    emit: emit,
+                    signposter: signposter
+                )
+            }
+            if DirectCommandDetector.isDirectCommand(validated.sourceText) {
+                return try await routeDirectCommand(validated, emit: emit, signposter: signposter)
+            }
         }
 
         let chunks = TranscriptChunker.chunks(
@@ -481,5 +492,110 @@ private extension LocalAssistService {
             message: "Routed with deterministic rules"
         ))
         return summary
+    }
+
+    /// One command per line, one card per command. Each line routes exactly
+    /// like a single command — model when available, reconciled against
+    /// that line, deterministic router on any failure — so a line can never
+    /// vanish: the rules engine is the floor for every line individually.
+    /// Cards accumulate into the streaming partial as lines finish, so a
+    /// four-command dump shows its first card while the fourth still routes.
+    func routeCommandBatch(
+        _ lines: [String],
+        request: AssistantRequest,
+        emit: @Sendable (SummaryGenerationUpdate) -> Void,
+        signposter: OSSignposter
+    ) async throws -> StructuredSummary {
+        let batchState = signposter.beginInterval("Route command batch")
+        defer {
+            signposter.endInterval("Route command batch", batchState)
+        }
+
+        emit(.init(phase: .checkingAvailability, message: "Checking Foundation Models availability"))
+        let availability: ModelAvailability
+        if let model {
+            availability = await model.availability()
+        } else {
+            availability = .unavailable(ModelUnavailability(reason: .adapterNotConfigured))
+        }
+        try Task.checkCancellation()
+
+        var actions: [RoutedAction] = []
+        var anyModelRouted = false
+        var fallbackReasons: [String] = []
+
+        for (index, line) in lines.enumerated() {
+            try Task.checkCancellation()
+            emit(.init(
+                phase: availability.isAvailable ? .streamingModel : .fallback,
+                partial: Self.routedPartial(from: actions),
+                message: "Routing command \(index + 1) of \(lines.count)"
+            ))
+
+            let lineRequest = AssistantRequest(
+                sourceText: line,
+                localeIdentifier: request.localeIdentifier,
+                maxSuggestions: request.maxSuggestions,
+                inputKind: request.inputKind
+            )
+
+            var lineActions: [RoutedAction] = []
+            if let model, availability.isAvailable {
+                do {
+                    if let routed = try await model.routeCommand(for: lineRequest) {
+                        lineActions = RoutedActionReconciler.reconciled(routed, sourceText: line)
+                        anyModelRouted = anyModelRouted || !lineActions.isEmpty
+                    }
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    fallbackReasons.append("Line \(index + 1): \(String(describing: error))")
+                }
+            }
+            if lineActions.isEmpty {
+                lineActions = [DeterministicCommandRouter().route(line)]
+            }
+            actions.append(contentsOf: lineActions)
+        }
+
+        let summary = RoutedActionMapper.summary(
+            from: Array(actions.prefix(max(request.maxSuggestions, lines.count))),
+            source: anyModelRouted ? .foundationModels : .deterministicFallback,
+            diagnostics: GenerationDiagnostics(
+                availability: availability,
+                fallbackReason: fallbackReasons.isEmpty ? nil : fallbackReasons.joined(separator: " | ")
+            )
+        )
+        emit(.init(
+            phase: .completed,
+            summary: summary,
+            message: anyModelRouted
+                ? "Routed \(lines.count) commands with Foundation Models"
+                : "Routed \(lines.count) commands with deterministic rules"
+        ))
+        return summary
+    }
+
+    /// The accumulated cards as a streaming partial, so the progress panel
+    /// renders each routed command the moment it lands.
+    private static func routedPartial(from actions: [RoutedAction]) -> StructuredSummaryPartial? {
+        guard !actions.isEmpty else {
+            return nil
+        }
+        return StructuredSummaryPartial(
+            suggestions: actions.map { action in
+                let suggestion = RoutedActionMapper.taskSuggestion(from: action, source: .foundationModels)
+                return TaskSuggestionPartial(
+                    title: suggestion.title,
+                    priority: suggestion.priority,
+                    dueHint: suggestion.dueHint,
+                    dueDate: suggestion.dueDate,
+                    action: suggestion.action,
+                    rationale: suggestion.rationale,
+                    confidence: suggestion.confidence
+                )
+            },
+            isComplete: false
+        )
     }
 }

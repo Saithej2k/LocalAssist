@@ -70,6 +70,13 @@ public actor FoundationModelsSummarizer: StructuredModelClient {
         guard model.availability == .available else {
             return
         }
+        // Typing in the capture box means a NEW conversation is coming —
+        // retire one that already has turns so the fresh session warms now
+        // instead of being built at Generate. Refine input never lands
+        // here, so a refinement conversation is never cut short.
+        if completedTurnsInSession > 0 {
+            resetConversation()
+        }
         // Handing the session the shared prompt opening lets it process
         // those tokens while the user is still typing, instead of at
         // Generate time. The prefix only pays off if `prompt(for:)` emits
@@ -171,6 +178,16 @@ public actor FoundationModelsSummarizer: StructuredModelClient {
         }
 
         let prompt = Self.prompt(for: request)
+
+        // A new capture is a new conversation. The shared session exists for
+        // the refine turns that follow a capture — but a live run dumped
+        // four fresh commands and got back a task from the PREVIOUS capture,
+        // because the old exchange still sat in the transcript and read as
+        // content. Refinement keeps the conversation; a fresh capture starts
+        // one.
+        if !request.isRefinement, completedTurnsInSession > 0 {
+            resetConversation()
+        }
 
         // Condense proactively instead of waiting for the overflow error.
         let projected = estimatedTranscriptCharacters + prompt.count
@@ -533,7 +550,12 @@ extension FoundationModelsSummarizer {
     /// Few-shot classification examples, not conditional rules — the pattern
     /// the on-device model actually follows (see RoutedCommand.swift). The
     /// date carries the weekday name because the model resolves "Sunday"
-    /// by counting forward from "Tuesday", not from "2026-07-07".
+    /// by counting forward from "Tuesday", not from "2026-07-07". Example
+    /// content stays deliberately unlike anything a user would write about
+    /// their own people: a greeting example ("hi amma how are you?") once
+    /// came back as its own routed card when a capture mentioned amma —
+    /// the same leak family as the brief-instructions example that was
+    /// removed.
     private static func routingInstructions() -> String {
         let today = routingDayString()
 
@@ -555,9 +577,9 @@ extension FoundationModelsSummarizer {
         "schedule dentist appointment Tuesday 2pm" → calendarEvent
         "remind me to pick up groceries" → reminder
         "remind me to finish the presentation" → reminder
-        "hi amma how are you doing, text this to amma now" → message
-        "hi amma how are you? send this now" → message
-        "the report is ready for review, email this to the team" → email
+        "running late, text this to sam" → message
+        "on my way, send this now" → message
+        "the draft is attached, email this to the team" → email
 
         Most commands are exactly ONE action. Only extract a second action \
         when the command explicitly asks for one, like "text Priya about \

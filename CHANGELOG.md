@@ -5,6 +5,20 @@ All notable changes to LocalAssist are documented here.
 ## Unreleased
 
 ### Product
+- A dump of one command per line becomes one card per line: "text
+  amma…" / "email HR…" / "meeting with Rahul…" / "remind me…" each
+  route individually — model when available, rules engine as the floor
+  for every line, so no line can vanish — and cards accumulate into the
+  streaming panel as each command lands. Line breaks now survive
+  validation; they used to be collapsed into one mushed line before the
+  router ever saw them.
+- New captures start clean: the model session is shared only with the
+  refine turns that follow a capture, so a fresh capture can no longer
+  surface a task from the previous one. Typing in the capture box
+  retires the old conversation and warms the new session early.
+- The capture box grows with its text — line by line to a cap, easing
+  instead of jumping — and only scrolls internally past the cap, instead
+  of a fixed-height pill with a scroll inside.
 - Settings grows a read-only Diagnostics section: the current model
   session's transcript — instructions, prompts, tool calls, tool
   outputs, responses, in order, each truncated for display — so tool
