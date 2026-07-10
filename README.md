@@ -79,7 +79,7 @@ The engine details that matter:
 # Full Xcode toolchain required: plain CommandLineTools builds but silently skips XCTest.
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 
-swift test                              # 92 tests
+swift test                              # 115 tests
 swift run localassist-selftest          # 47 end-to-end checks
 swift run localassist-eval --min-score 0.9
 swift run localassist --text "Call Mom tonight, pick up the birthday cake Saturday, and book the dentist for next week." --plain
@@ -98,7 +98,7 @@ Verification is deterministic and CI-gated — no LLM judges, no flaky assertion
 
 | Check | What it covers | Status |
 | --- | --- | --- |
-| `swift test` (92) | Fallback policy, error taxonomy, typed streaming order, map-reduce chunking, task completion persistence, cancellation, concurrency, due-date parsing, local-day due-date policy, capture-kind inference, direct-command detection and routing, tool calls, executor writes, conversation memory, legacy decode, eval scorers | ✅ |
+| `swift test` (115) | Fallback policy, error taxonomy, typed streaming order, map-reduce chunking, task completion persistence, cancellation, concurrency, due-date parsing, local-day due-date policy, capture-kind inference, direct-command detection and routing, routed-action reconciliation, sms handoff encoding, tool calls, executor writes, conversation memory, legacy decode, eval scorers | ✅ |
 | `localassist-selftest` (47) | End-to-end scenario checks runnable on any machine | ✅ |
 | `localassist-eval` | Task recall, due-date accuracy, action mapping, structure compliance, hallucination probes over a fixed dataset; dated reports in [docs/evals](docs/evals); CI fails below 0.9 | ✅ 1.00 |
 | `localassist-bench` | p50–p99 latency, throughput, peak memory, fallback rate, cancellation timing; baselines in [docs/performance](docs/performance) | ✅ |
@@ -113,10 +113,10 @@ Profiling: `OSSignposter` intervals cover every pipeline stage. See [docs/instru
 | --- | --- |
 | `LocalAssistCore` | Platform-agnostic engine: validation, typed partials, failure taxonomy, normalization, deterministic fallback, due-date parsing, conversation memory, action seams, history, metrics |
 | `LocalAssistFoundationModels` | On-device adapter: `DailyBrief` contract and the `FoundationModelsSummarizer` actor |
-| `LocalAssistSystemTools` | EventKit-backed calendar tool + `SystemActionExecutor` for confirmed writes |
+| `LocalAssistSystemTools` | EventKit calendar free/busy tool, Contacts lookup tool, and `SystemActionExecutor` for confirmed writes |
 | `LocalAssistAppIntents` | App Entities, App Shortcuts, capture intent, snippet-confirmed reminder intent |
-| `LocalAssistAppUI` | Liquid Glass tabbed surface (Capture · Today · History), single self-classifying input, voice transcription, Action Review, settings, morning brief |
+| `LocalAssistAppUI` | Liquid Glass tabbed surface (Home · Today · History · Settings), single self-classifying input, voice transcription, Action Review, morning brief |
 | `LocalAssistEvalKit` + `localassist-eval` | Eval dataset, scorers, reports, CI gate |
-| `LocalAssistCLI` / `LocalAssistBenchmarks` | Demo CLI and performance harness |
+| `LocalAssistCLI` / `LocalAssistBenchmarks` / `localassist-selftest` | Demo CLI, performance harness, and machine-independent end-to-end checks |
 
 A point-by-point implementation map lives in [docs/apple-readiness.md](docs/apple-readiness.md).
