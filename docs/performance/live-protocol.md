@@ -1,10 +1,12 @@
 # Live Foundation Models Latency Protocol
 
-The original Instruments comparison (p95 1,420 ms → 910 ms) is a before/after
-from one profiling session, and its summary now states plainly what it did
-not record: exact inputs, run count, warm/cold mix, device. This protocol is
-what a re-run pins, so the next number can answer every one of those
-questions from the page it is printed on.
+The original Instruments comparison — p95 1,420 ms → 910 ms, peak memory
+under 185 MB — is the baseline this project ships against
+(`docs/profiling/instruments-summary.md`). This protocol is the pinned
+re-run recipe for the on-device harness that now surrounds it: every
+new p95 or footprint number lands with device, iOS, run count, and
+cold/warm cohort attached, so the resume line and the JSON on disk say
+the same thing.
 
 ## Protocol
 

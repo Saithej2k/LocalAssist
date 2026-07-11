@@ -47,7 +47,7 @@ Record:
 
 See [2026-07-02-baseline.md](performance/2026-07-02-baseline.md).
 
-The local CLI baseline measures deterministic fallback performance for repeatable CI. It is not the same measurement as the 1,420 ms to 910 ms Foundation Models Instruments profile.
+The local CLI baseline measures the deterministic fallback path for repeatable CI coverage. The Foundation Models Instruments profile — p95 1,420 ms → 910 ms with app-process peak memory under 185 MB — lives in [docs/profiling/instruments-summary.md](profiling/instruments-summary.md) and describes a separate workload (Smart-brief through `SystemLanguageModel`), so the two numbers should be read side by side, not against each other.
 
 ## Voice Capture Signposts
 

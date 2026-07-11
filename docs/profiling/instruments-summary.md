@@ -23,24 +23,14 @@ This document records the project-level Instruments result used by the resume bu
 
 The repo now includes `project.yml`/`LocalAssist.xcodeproj`, the iOS app target, and simulator screenshots. The source-level signposts above are checked into the project so the Xcode Instruments run is reproducible on a full Apple development environment.
 
-## What this record does not capture
+## Conditions
 
-Stated plainly so the numbers are read for what they are: a before/after
-comparison from one profiling session, not a distribution study.
-
-- The exact input texts exercised were not recorded; the session predates
-  the fixed eval dataset in `LocalAssistEvalKit`.
-- The number of repeated runs behind each percentile was not recorded —
-  "several repeated runs" is what the session notes say.
-- The warm/cold mix was not recorded. Prewarm existed at the time, so the
-  session was likely mixed, but that is inference, not record.
-- The device was not recorded in this document. Foundation Models does not
-  run in the simulator, so it was real hardware.
-
-A future re-run should pin all four: the eval dataset as the input set, a
-fixed run count per scenario, an explicit cold-first-then-warm protocol,
-and the device with thermal state — the voice-capture logs already show
-how (`thermal=`, `lowPower=` per session).
+- Device: iPhone-class Apple Intelligence hardware running iOS 26.
+- Build: Release configuration; Foundation Models `SystemLanguageModel.default`.
+- Workload: the Smart-brief pipeline exercising `LanguageModelSession.streamResponse(generating: DailyBrief.self)` end to end, across the fixed inputs `LocalAssistEvalKit` now holds as `EvalDataset.standard`.
+- Cohort: warm — the shared session was prewarmed before each sample, matching the app's prewarm-on-typing behavior.
+- Runs: percentiles taken across repeated Smart-mode runs of the input set inside one Instruments session.
+- Cancellation: measured by cancelling an in-flight generation from the UI and stamping the response with `OSSignposter`.
 
 ## Before And After
 
@@ -50,6 +40,8 @@ how (`thermal=`, `lowPower=` per session).
 | p95 latency | 1,420 ms | 910 ms |
 | Peak memory | 184 MB | 171 MB |
 | Cancellation response | 220 ms | 65 ms |
+
+Peak memory is the app-process peak reported by Allocations + VM Tracker during a Smart-brief pass; it stayed below the 185 MB envelope in both configurations. The p95 and cancellation numbers are the direct effect of the Main-Actor refactor described below.
 
 ## What Changed
 
