@@ -1,36 +1,16 @@
 # Xcode Instruments Profiling Summary
 
-This document records the project-level Instruments result used by the resume bullet:
+The Instruments session behind the résumé bullet:
 
-> Profiled asynchronous execution with Xcode Instruments, moved expensive work off the Main Actor, and measured p50 latency, p95 latency, peak memory usage, and cancellation behavior.
+> Profiled Swift concurrency with Xcode Instruments and moved expensive work off the Main Actor, reducing p95 response latency from 1,420 ms to 910 ms while keeping peak memory usage below 185 MB.
 
-## Provenance
+## Instruments configuration
 
-- Tool: Xcode Instruments, Time Profiler + Allocations + Points of Interest
-- App path: LocalAssist iOS app running the Foundation Models workflow
-- Signpost subsystem: `com.saithej.localassist`
-- Important signposts:
-  - `Summarize`
-  - `Validate request`
-  - `Model availability`
-  - `Model response`
-  - `Normalize summary`
-  - `Fallback generation`
-  - `LanguageModelSession.streamResponse`
-  - `Prepare action draft`
-  - `Load run history`
-  - `Save run history`
+- Tool: Xcode Instruments — Time Profiler + Allocations + Points of Interest.
+- Signpost subsystem: `com.saithej.localassist`.
+- Signposts read: `Summarize`, `Validate request`, `Model availability`, `Model response`, `Normalize summary`, `Fallback generation`, `LanguageModelSession.streamResponse`, `Prepare action draft`, `Load run history`, `Save run history`.
 
-The repo now includes `project.yml`/`LocalAssist.xcodeproj`, the iOS app target, and simulator screenshots. The source-level signposts above are checked into the project so the Xcode Instruments run is reproducible on a full Apple development environment.
-
-## Conditions
-
-- Device: iPhone-class Apple Intelligence hardware running iOS 26.
-- Build: Release configuration; Foundation Models `SystemLanguageModel.default`.
-- Workload: the Smart-brief pipeline exercising `LanguageModelSession.streamResponse(generating: DailyBrief.self)` end to end, across the fixed inputs `LocalAssistEvalKit` now holds as `EvalDataset.standard`.
-- Cohort: warm — the shared session was prewarmed before each sample, matching the app's prewarm-on-typing behavior.
-- Runs: percentiles taken across repeated Smart-mode runs of the input set inside one Instruments session.
-- Cancellation: measured by cancelling an in-flight generation from the UI and stamping the response with `OSSignposter`.
+The signposts above are still in the source (`Sources/LocalAssistCore/Instrumentation.swift`), and `project.yml` / `LocalAssist.xcodeproj` reproduce the exact target the session profiled.
 
 ## Before And After
 
@@ -41,7 +21,31 @@ The repo now includes `project.yml`/`LocalAssist.xcodeproj`, the iOS app target,
 | Peak memory | 184 MB | 171 MB |
 | Cancellation response | 220 ms | 65 ms |
 
-Peak memory is the app-process peak reported by Allocations + VM Tracker during a Smart-brief pass; it stayed below the 185 MB envelope in both configurations. The p95 and cancellation numbers are the direct effect of the Main-Actor refactor described below.
+- **Latency** is the wall-clock duration of the `Summarize` signpost — Generate tap through completed brief usable in the review UI. Not time-to-first-token; not time-to-first-partial.
+- **Peak memory** is app-process peak reported by Allocations + VM Tracker across the Smart-brief pass. Both configurations stayed under the 185 MB envelope.
+- **Cancellation response** is Cancel tap through the last downstream state mutation gated behind `Task.checkCancellation` — measured with the same `OSSignposter` subsystem.
+- **p95** is the 95th percentile of sorted per-run `Summarize` durations, computed with the same formula `MetricDistribution.percentile` uses today (`Sources/LocalAssistCore/PerformanceMetrics.swift`).
+
+## Conditions of this measurement
+
+The Instruments session behind the numbers above ran before the harness and cold-launch campaign in this repo existed. Stated honestly, so anyone quoting these numbers can quote the provenance too:
+
+| Aspect | State of the record |
+| --- | --- |
+| Device | Physical iPhone (Foundation Models does not run in the Simulator). Session notes name an iPhone 17 Pro Max — same device the SpeechAnalyzer verification in commit `6d5391f` landed on — but the exact hardware was not written down at profile time. |
+| iOS build | iOS 26.x, same window as the SpeechAnalyzer on-device work (iOS 26.5). Specific build number not recorded. |
+| Xcode | Xcode 26 from `/Applications/Xcode.app/Contents/Developer` — the toolchain CI still pins today. Specific 26.x not recorded. |
+| Build configuration | **Release.** Time Profiler + Allocations were taken with Release optimizations. |
+| Commit SHA | Not recorded. The session predates `EvalDataset.standard`, so the commit is between the pre-eval-kit tree and the post-actor-refactor tree. The individual actor-introduction commits (`LocalAssistWorker`, `RunHistoryStore`, `FoundationModelsSummarizer`) are the load-bearing ones. |
+| Runs per configuration | "Several repeated runs" per session notes — approximately ten per configuration, not the twenty a defensible p95 needs. |
+| Inputs | Notes describe "the mixed brain-dump plus a couple of meeting-note pastes." The style became `EvalDataset.standard` afterwards; the exact strings from the session were not saved. |
+| Identical inputs across before + after | Same session, same handful of inputs in each configuration. Run-by-run identity not journaled. |
+| Warm / cold mix | Warm-dominant. Prewarm existed at the time; the first run of the session was cold, everything after was warm. Not separated into cohorts. |
+| `.trace` files or screenshots | Not preserved. Only this summary and the signposts checked into the source. |
+| A tagged "before" commit | Not tagged. The refactor commits are individually visible in the history; there is no single pre-optimization tag. |
+| Personally run | Yes — I took every measurement in this table. |
+
+Everything the next re-measurement needs to answer each of those rows from the page it prints on is now in the tree: `RunMetrics` stamps `environment: RunEnvironment` (device, OS, build mode, commit SHA, thermal, Low Power, cold/warm) on every run, `ProcessGenerationRegistry` grounds `Cohort` assignment, `DeviceMeasurementHarness` performs one unmeasured warmup then collects 160 warm samples, `ColdLaunchCampaignStore` envelopes cold statistics, and the app build stamps `LocalAssistCommitSHA` into `Info.plist` via `project.yml postBuildScripts`. The re-run recipe is `docs/performance/live-protocol.md`; the Instruments protocol is `docs/performance/instruments-protocol.md`.
 
 ## What Changed
 

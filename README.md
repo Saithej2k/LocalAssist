@@ -120,7 +120,7 @@ Profiling with Xcode Instruments (Time Profiler + Allocations + Points of Intere
 | Peak memory | 184 MB | **171 MB** (under the 185 MB envelope) |
 | Cancellation response | 220 ms | 65 ms |
 
-Both configurations exercise the Smart-brief Foundation Models path end to end. The pinned re-run recipe for a fresh device baseline lives in [docs/performance/live-protocol.md](docs/performance/live-protocol.md); a debug-only measurement harness (Settings → Measurement) runs 160 warm samples of `EvalDataset.standard` alongside a cold-launch campaign envelope (device, OS, build, commit SHA, expected source) so numbers stay tied to the conditions they were taken under.
+Both configurations exercise the Smart-brief Foundation Models path end to end; latency is the wall-clock duration of the `Summarize` signpost (Generate tap → completed brief in the review UI), and peak memory is the app-process peak reported by Allocations + VM Tracker. The [Instruments summary](docs/profiling/instruments-summary.md) states the session's provenance in a table — device class, build configuration, N, cohort, saved artifacts — including what the session notes did **not** record, so anyone quoting the numbers quotes the conditions with them. The pinned re-run recipe for a fresh device baseline lives in [docs/performance/live-protocol.md](docs/performance/live-protocol.md); a debug-only measurement harness (Settings → Measurement) runs 160 warm samples of `EvalDataset.standard` alongside a cold-launch campaign envelope (device, OS, build, commit SHA, expected source) so future numbers stay tied to the conditions they were taken under.
 
 ## Package layout
 
