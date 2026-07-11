@@ -171,8 +171,9 @@ struct SettingsFormView: View {
                     Text("Measurement (debug builds only)")
                 } footer: {
                     Text(
-                        "Runs the eval dataset 20× per case through the real pipeline and "
-                            + "exports timings, cohorts, and app-process footprint as JSON. "
+                        "One unmeasured warmup, then the eval dataset 20× per case through "
+                            + "the real pipeline — 160 warm samples, plus the active cold-launch "
+                            + "campaign and 100 ms periodic footprint sampling, exported as JSON. "
                             + "Not present in release builds."
                     )
                 }

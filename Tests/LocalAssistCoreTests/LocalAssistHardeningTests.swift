@@ -337,6 +337,41 @@ final class LocalAssistDeadlineTests: XCTestCase {
         }
     }
 
+    func testOuterCancellationReleasesUncooperativeOperationImmediately() async {
+        // The gate must resume with CancellationError from the cancellation
+        // handler itself — not wait for the operation to notice (it never
+        // will) and not wait for the budget (30 s away).
+        let clock = ContinuousClock()
+        let started = clock.now
+        let task = Task {
+            try await LocalAssistDeadline.run(.seconds(30), stage: "uncooperative") { () -> Int in
+                var spun = 0
+                let blockUntil = ContinuousClock.now.advanced(by: .seconds(30))
+                while ContinuousClock.now < blockUntil {
+                    spun += 1
+                    if spun.isMultiple(of: 1_000_000) {
+                        // Yields without ever checking Task.isCancelled.
+                        await Task.yield()
+                    }
+                }
+                return spun
+            }
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("expected cancellation")
+        } catch is CancellationError {
+            XCTAssertLessThan(
+                started.duration(to: clock.now), .seconds(5),
+                "outer cancel must release the caller now, not at the budget"
+            )
+        } catch {
+            XCTFail("expected CancellationError, got \(error)")
+        }
+    }
+
     func testOuterCancellationPropagates() async {
         let task = Task {
             try await LocalAssistDeadline.run(.seconds(30), stage: "test") {

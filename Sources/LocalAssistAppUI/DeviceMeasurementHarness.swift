@@ -8,37 +8,30 @@
 
     /// Debug-only automated measurement harness for the physical iPhone.
     ///
-    /// Runs `EvalDataset.standard` through the real service repeatedly,
-    /// timing what the user actually feels — first structured update,
-    /// completed generation, action-review readiness through the same
-    /// `LocalAssistWorker` path production uses — plus the injected
-    /// fallback path. App-process memory is sampled continuously on a
-    /// background task for the whole measurement interval, not just at
-    /// sample boundaries. Export is stable JSON with full device/build
-    /// metadata, so runs on different days or devices compare honestly.
+    /// Performs one **unmeasured session-cold warmup**, then runs
+    /// `EvalDataset.standard` repeatedly through the real service — so the
+    /// dataset is exactly cases × repetitions of genuinely warm samples,
+    /// with no mislabeled first run. Timing covers what the user actually
+    /// feels: first structured update, completed generation, and
+    /// action-review readiness through the same `LocalAssistWorker`
+    /// orchestration production uses (contact enrichment included).
     ///
-    /// Cohorts are facts, not labels:
-    /// - `processCold`: no generation had started in this process before
-    ///   the sample (grounded in `ProcessGenerationRegistry`) — at most one
-    ///   per launch, and only when nothing else generated first.
-    /// - `sessionCold`: first sample on this harness run's fresh service —
-    ///   sessions and prewarm state cold, process already warm.
-    /// - `warm`: everything else.
+    /// Cold numbers never come from this run. They come from the
+    /// cold-launch campaign (`ColdLaunchCampaignStore`): launches with
+    /// `LOCALASSIST_MEASURE_PROCESS_COLD` record exactly one sample each as
+    /// the process's first generation, and the report embeds the active
+    /// campaign's records — only that campaign's.
     ///
-    /// Genuine process-cold statistics need repeated launches: the
-    /// `LOCALASSIST_MEASURE_PROCESS_COLD` launch argument makes the app run
-    /// exactly one sample at startup and append it to a JSONL outbox in
-    /// Documents; the `MeasurementColdLaunchTests` XCUITest drives 20 such
-    /// launches on a connected device. `run()` folds any accumulated
-    /// process-cold samples into its report.
-    ///
-    /// Failures are data: a sample that throws or never completes is kept
-    /// as a `FailedSample` with its typed failure category — silently
-    /// dropping errors would make a flaky device look fast.
+    /// Failures are data: a repetition that throws or ends without a
+    /// summary is preserved as a `FailedSample` with its typed failure
+    /// category — silently dropping errors would make a flaky device look
+    /// fast. Memory is 100 ms periodic footprint sampling for the whole
+    /// interval — periodic, not continuous; true-peak claims require
+    /// Instruments VM Tracker.
     public enum DeviceMeasurementHarness {
         public struct Configuration: Sendable {
             /// Repetitions per case. 20 over the 8-case dataset = the
-            /// 160-warm-run floor for stable percentiles.
+            /// 160-warm-sample floor for stable percentiles.
             public var repetitions: Int
             /// True routes through the on-device model (requires an
             /// eligible device with Apple Intelligence enabled); false
@@ -85,7 +78,10 @@
             public var detectionToCompletionMilliseconds: Double
         }
 
-        /// Continuous footprint statistics over the measurement interval.
+        /// 100 ms periodic footprint sampling over the measurement
+        /// interval. Periodic, not continuous: a spike shorter than the
+        /// sampling interval can be missed — the true peak requires
+        /// Instruments (Allocations + VM Tracker).
         public struct MemoryProfile: Codable, Equatable, Sendable {
             public var peakMB: Double
             public var meanMB: Double
@@ -103,9 +99,13 @@
             public var failedSamples: [FailedSample]
             public var fallbackSamples: [FallbackSample]
             public var memory: MemoryProfile
-            /// Samples collected by prior `LOCALASSIST_MEASURE_PROCESS_COLD`
-            /// launches and folded into this report from the JSONL outbox.
-            public var processColdLaunchSamples: [Sample]
+            /// One unmeasured session-cold generation ran before sampling,
+            /// so every sample above is genuinely warm.
+            public var unmeasuredWarmupPerformed: Bool
+            /// The active cold-launch campaign and its records, when one
+            /// exists. Only records carrying this campaign's ID are
+            /// included — different campaigns never fold together.
+            public var coldLaunchCampaign: ColdLaunchCampaignStore.Summary?
             /// What this harness cannot measure by itself, stated in the
             /// artifact so a reader never assumes otherwise.
             public var caveats: [String]
@@ -137,20 +137,24 @@
             let monitor = MemoryMonitor()
             monitor.start()
 
+            // One unmeasured warmup consumes the session-cold (or
+            // process-cold) first generation, so every measured sample is
+            // genuinely warm — cases × repetitions warm runs, no mislabeled
+            // first sample. Cold statistics come from the cold-launch
+            // campaign, not from here.
+            _ = try? await service.summarize(AssistantRequest(
+                sourceText: EvalDataset.standard[0].input,
+                maxSuggestions: EvalDataset.standard[0].maxSuggestions
+            ))
+
             var samples: [Sample] = []
             var failures: [FailedSample] = []
-            var sampleIndex = 0
             for evalCase in EvalDataset.standard {
                 for repetition in 0 ..< configuration.repetitions {
-                    let cohort = cohort(
-                        sampleIndex: sampleIndex,
-                        priorProcessGenerations: ProcessGenerationRegistry.generationsStarted()
-                    )
-                    sampleIndex += 1
                     switch await measureOne(
                         evalCase: evalCase,
                         repetition: repetition,
-                        cohort: cohort,
+                        cohort: .warm,
                         service: service,
                         worker: worker
                     ) {
@@ -177,11 +181,16 @@
                 failedSamples: failures,
                 fallbackSamples: fallbackSamples,
                 memory: memory,
-                processColdLaunchSamples: ProcessColdOutbox.load(),
+                unmeasuredWarmupPerformed: true,
+                coldLaunchCampaign: ColdLaunchCampaignStore.summaryOfActiveCampaign(),
                 caveats: [
-                    "processCold requires nothing to have generated earlier in the launch; "
-                        + "collect ≥20 via the LOCALASSIST_MEASURE_PROCESS_COLD launch argument "
-                        + "(MeasurementColdLaunchTests drives this on a connected device)",
+                    "warm samples only: one unmeasured warmup consumed the session-cold generation; "
+                        + "cold statistics come from the cold-launch campaign "
+                        + "(LOCALASSIST_MEASURE_PROCESS_COLD launches, MeasurementColdLaunchTests)",
+                    "20 cold launches support an aggregate cold p95 only; "
+                        + "per-case cold percentiles need 20 launches per case (160 total)",
+                    "memory is 100 ms periodic footprint sampling, not a continuous record — "
+                        + "the true peak requires Instruments (Allocations + VM Tracker)",
                     "microphone startup/drain timings come from real captures (VoiceSessionTimeline), not this harness",
                     "text inputs from EvalDataset.standard; real-speech numbers require the physical speech corpus",
                 ]
@@ -199,14 +208,14 @@
             return priorProcessGenerations == 0 ? .processCold : .sessionCold
         }
 
-        private enum MeasureOutcome {
+        enum MeasureOutcome {
             case success(Sample)
             case failure(FailedSample)
         }
 
         /// One repetition of one case: TTFT, completed generation, and
         /// action-review readiness through the production worker path.
-        private static func measureOne(
+        static func measureOne(
             evalCase: EvalCase,
             repetition: Int,
             cohort: Cohort,
@@ -311,9 +320,12 @@
 
         /// When the app was launched with `LOCALASSIST_MEASURE_PROCESS_COLD`,
         /// runs exactly one sample — the true first generation of this
-        /// process — and appends it to the JSONL outbox. Call from the app's
-        /// launch path before anything else can generate. Returns true when
-        /// a sample was collected (the XCUITest waits on this via UI state).
+        /// process — classifies it against the campaign's expected source,
+        /// and appends it durably to the campaign records. Call from the
+        /// app's launch path before anything else can generate. Returns
+        /// true only after the record's durable write succeeded — the
+        /// XCUITest completion marker keys off this, so a launch whose
+        /// write failed shows no marker and fails loudly.
         @discardableResult
         public static func runProcessColdSampleIfRequested() async -> Bool {
             let info = ProcessInfo.processInfo
@@ -326,15 +338,36 @@
                 return false
             }
 
-            // Rotate through the dataset across launches so 20 launches
-            // spread over the cases instead of hammering one.
-            let launchIndex = ProcessColdOutbox.count()
-            let evalCase = EvalDataset.standard[launchIndex % EvalDataset.standard.count]
+            if info.arguments.contains("LOCALASSIST_COLD_CAMPAIGN_RESET") {
+                try? ColdLaunchCampaignStore.reset()
+            }
+
             let useModel = info.environment["LOCALASSIST_FORCE_OFFLINE"] != "1"
+            let expectedSource: GenerationSource = useModel ? .foundationModels : .deterministicFallback
+            let campaign: ColdLaunchCampaignStore.Campaign
+            do {
+                // Explicit begin exists (`ColdLaunchCampaignStore.begin`);
+                // the launch hook begins one automatically when none is
+                // active so the first cold launch of a fresh campaign
+                // needs no separate setup step.
+                if let active = ColdLaunchCampaignStore.active() {
+                    campaign = active
+                } else {
+                    campaign = try ColdLaunchCampaignStore.begin(expectedSource: expectedSource)
+                }
+            } catch {
+                return false
+            }
+
+            // Rotate through the dataset across launches so a campaign
+            // spreads over the cases instead of hammering one.
+            let launchIndex = ColdLaunchCampaignStore.records(for: campaign).count
+            let evalCase = EvalDataset.standard[launchIndex % EvalDataset.standard.count]
             let service: LocalAssistService = useModel
                 ? LocalAssistLiveFactory.makeService(tools: LocalAssistToolkit.liveTools())
                 : LocalAssistService()
 
+            let record: ColdLaunchCampaignStore.Record
             switch await measureOne(
                 evalCase: evalCase,
                 repetition: launchIndex,
@@ -343,52 +376,38 @@
                 worker: LocalAssistWorker()
             ) {
             case .success(let sample):
-                ProcessColdOutbox.append(sample)
+                // A deterministic-fallback answer in a campaign meant to
+                // measure Foundation Models is not a cold model number —
+                // classified separately, never mixed into the samples.
+                let classification: ColdLaunchCampaignStore.Classification =
+                    sample.source == campaign.expectedSource ? .sample : .unexpectedSource
+                record = ColdLaunchCampaignStore.Record(
+                    campaignID: campaign.id,
+                    recordedAt: Date(),
+                    environment: .current(coldStart: true),
+                    expectedSource: campaign.expectedSource,
+                    classification: classification,
+                    sample: sample,
+                    failure: nil
+                )
+            case .failure(let failed):
+                // Cold-launch failures are campaign data too.
+                record = ColdLaunchCampaignStore.Record(
+                    campaignID: campaign.id,
+                    recordedAt: Date(),
+                    environment: .current(coldStart: true),
+                    expectedSource: campaign.expectedSource,
+                    classification: .failure,
+                    sample: nil,
+                    failure: failed
+                )
+            }
+
+            do {
+                try ColdLaunchCampaignStore.append(record)
                 return true
-            case .failure:
+            } catch {
                 return false
-            }
-        }
-
-        /// Durable JSONL outbox for process-cold samples, one object per
-        /// line, in Documents so it survives relaunches and ships with the
-        /// container.
-        enum ProcessColdOutbox {
-            static var fileURL: URL {
-                let documents = FileManager.default.urls(
-                    for: .documentDirectory,
-                    in: .userDomainMask
-                ).first ?? FileManager.default.temporaryDirectory
-                return documents.appendingPathComponent("localassist-process-cold.jsonl")
-            }
-
-            static func append(_ sample: Sample) {
-                guard let line = try? JSONEncoder().encode(sample) else {
-                    return
-                }
-                var data = line
-                data.append(Data("\n".utf8))
-                if let handle = try? FileHandle(forWritingTo: fileURL) {
-                    defer { try? handle.close() }
-                    _ = try? handle.seekToEnd()
-                    try? handle.write(contentsOf: data)
-                } else {
-                    try? data.write(to: fileURL, options: [.atomic])
-                }
-            }
-
-            static func load() -> [Sample] {
-                guard let data = try? Data(contentsOf: fileURL) else {
-                    return []
-                }
-                let decoder = JSONDecoder()
-                return data
-                    .split(separator: UInt8(ascii: "\n"))
-                    .compactMap { try? decoder.decode(Sample.self, from: $0) }
-            }
-
-            static func count() -> Int {
-                load().count
             }
         }
 
@@ -413,10 +432,10 @@
 
     // MARK: - Memory
 
-    /// Samples `phys_footprint` on a background task for the whole
-    /// measurement interval — a spike between sample boundaries is
-    /// exactly the kind of number Jetsam cares about and a
-    /// point-in-time read misses.
+    /// Samples `phys_footprint` on a background task at a 100 ms cadence
+    /// for the whole measurement interval — periodic sampling, not a
+    /// continuous record. A spike between samples can be missed; the true
+    /// peak requires Instruments VM Tracker.
     final class MemoryMonitor: Sendable {
         private struct State {
             var peakMB: Double = 0

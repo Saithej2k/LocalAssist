@@ -25,16 +25,18 @@ measurement.
 
 ## Cohorts
 
-The harness labels every sample with a fact-based cohort:
+Cohorts are facts, grounded in a process-wide generation registry:
 
 - **processCold** — no generation had started in the process before the
-  sample (`ProcessGenerationRegistry` was zero). At most one per launch.
-- **sessionCold** — first sample on the harness run's fresh service, in a
-  process that had already generated.
+  sample. At most one per launch.
+- **sessionCold** — first generation on a fresh service in a process that
+  had already generated.
 - **warm** — everything else.
 
-Genuine process-cold statistics need repeated launches. Collect ≥20 with
-the cold-launch UI test on the connected phone:
+The in-app harness runs **one unmeasured session-cold warmup** before
+sampling, so its dataset is exactly 8 cases × 20 repetitions of warm
+samples — "160 warm runs" with no mislabeled first sample. Cold numbers
+never come from that run; they come from a **cold-launch campaign**:
 
 ```bash
 LOCALASSIST_COLD_LAUNCHES=20 xcodebuild test \
@@ -43,14 +45,26 @@ LOCALASSIST_COLD_LAUNCHES=20 xcodebuild test \
   -only-testing:LocalAssistUITests/MeasurementColdLaunchTests
 ```
 
-Each launch runs exactly one sample as the process's first generation
-(launch automation is suppressed for these launches so nothing generates
-first) and appends it to a JSONL outbox in Documents; the next Settings
-measurement run folds them into its report under
-`processColdLaunchSamples`. Failed samples are preserved with their typed
-failure category — error rate is part of the measurement — and memory is
-sampled continuously (100 ms cadence) for the whole interval, so
-between-sample spikes land in `memory.peakMB`.
+The first launch resets and begins a campaign — an envelope pinning
+campaign ID, timestamp, device, OS, build configuration, commit SHA, and
+the expected generation source. Each launch runs exactly one sample as
+the process's first generation (launch automation is suppressed so
+nothing generates first), classifies it against the expected source
+(a deterministic-fallback answer in a Foundation Models campaign is
+recorded as `unexpectedSource`, never counted as a cold model sample),
+and appends the record durably — fsync before the UI-test completion
+marker appears, so a failed write fails the launch loudly. Failures are
+campaign records too, with their typed category. Reports embed only the
+active campaign's records; different campaigns never fold together.
+
+**Statistics honesty:** 20 cold launches support an *aggregate* cold p95
+only. For per-case cold percentiles run 20 launches per case
+(`LOCALASSIST_COLD_LAUNCHES=160` over the 8-case dataset).
+
+**Memory:** the harness does 100 ms periodic footprint sampling — not a
+continuous record. A spike shorter than the sampling interval can be
+missed; claim a true peak only from Instruments (Allocations + VM
+Tracker, below).
 
 ## Time Profiler
 

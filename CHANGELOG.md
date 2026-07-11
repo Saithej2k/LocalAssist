@@ -7,27 +7,39 @@ All notable changes to LocalAssist are documented here.
 ### Measurement rigor (2026-07-11, follow-up)
 - Cohorts are now facts, not labels: `processCold` (no generation had
   started in the process, per a process-wide generation registry),
-  `sessionCold` (fresh service, warm process), `warm` — only the true
-  first generation of a launch can be process-cold.
-- Genuine process-cold collection: launching with
+  `sessionCold` (fresh service, warm process), `warm`. The in-app
+  harness performs one unmeasured session-cold warmup first, so its
+  dataset is exactly 160 genuinely warm samples — no mislabeled first
+  run.
+- Cold-launch collection lives in a campaign envelope
+  (`ColdLaunchCampaignStore`): campaign ID, timestamp, device, OS,
+  build configuration, commit SHA, and expected generation source, with
+  explicit begin/reset/finalize. Launching with
   `LOCALASSIST_MEASURE_PROCESS_COLD` runs exactly one sample as the
-  process's first generation and appends it to a durable JSONL outbox;
-  `MeasurementColdLaunchTests` drives ≥20 such relaunches on a connected
-  device and the next report folds them in. Launch automation is
-  suppressed on measurement launches so nothing generates first.
+  process's first generation, classifies it against the campaign's
+  expected source (a deterministic-fallback answer in a Foundation
+  Models campaign is recorded as `unexpectedSource`, never counted as a
+  cold model sample), and appends the record durably — fsync before the
+  XCUITest completion marker appears. Failures are campaign records too.
+  Reports embed only the active campaign; different campaigns never
+  fold together. 20 launches support an aggregate cold p95 only —
+  per-case cold percentiles need 20 per case (160 launches).
 - Failed samples are preserved with typed failure categories instead of
   silently dropped — error rate is part of the measurement.
-- Memory is sampled continuously (100 ms cadence) for the whole
-  measurement interval; between-sample spikes now land in the reported
-  peak, alongside mean and sample count.
+- Memory is 100 ms periodic footprint sampling across the whole
+  measurement interval (peak/mean/sample count) — periodic, not
+  continuous; true-peak claims require Instruments VM Tracker.
 - Action Review readiness is measured through the production
   `LocalAssistWorker` orchestration (contact enrichment included), not a
   preparer shortcut.
-- `LocalAssistDeadline` now releases the caller at the budget even when
-  the operation cannot observe cancellation (a sync XPC call wedged in a
-  system daemon): the race is deliberately unstructured and the stuck
-  task is abandoned — proven by a test that blocks uncooperatively for
-  30 s and still returns in ~100 ms.
+- `LocalAssistDeadline` is a first-wins gate across three racers —
+  operation, budget, outer cancellation. Outer cancellation resumes the
+  caller with `CancellationError` directly from the cancellation
+  handler, even when the operation never cooperates (a sync XPC call
+  wedged in a system daemon); the timeout task is cancelled the moment
+  the operation settles; the wedged task is cancelled and abandoned —
+  proven by tests that block uncooperatively for 30 s and return in
+  ~100 ms either way.
 
 ### Production hardening (2026-07-11)
 - Briefs can be deleted: long-press a history card (or clear all) and the
