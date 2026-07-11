@@ -21,7 +21,36 @@ measurement.
    past app install, thermal state nominal before the first sample.
 4. Workload: the eight `EvalDataset.standard` inputs, pasted or run via the
    debug measurement harness (Settings → Measurement → Run device
-   measurement), 20 repetitions per case.
+   measurement), 20 repetitions per case — the 160-warm-run floor.
+
+## Cohorts
+
+The harness labels every sample with a fact-based cohort:
+
+- **processCold** — no generation had started in the process before the
+  sample (`ProcessGenerationRegistry` was zero). At most one per launch.
+- **sessionCold** — first sample on the harness run's fresh service, in a
+  process that had already generated.
+- **warm** — everything else.
+
+Genuine process-cold statistics need repeated launches. Collect ≥20 with
+the cold-launch UI test on the connected phone:
+
+```bash
+LOCALASSIST_COLD_LAUNCHES=20 xcodebuild test \
+  -project LocalAssist.xcodeproj -scheme LocalAssist \
+  -destination 'platform=iOS,name=<your iPhone>' \
+  -only-testing:LocalAssistUITests/MeasurementColdLaunchTests
+```
+
+Each launch runs exactly one sample as the process's first generation
+(launch automation is suppressed for these launches so nothing generates
+first) and appends it to a JSONL outbox in Documents; the next Settings
+measurement run folds them into its report under
+`processColdLaunchSamples`. Failed samples are preserved with their typed
+failure category — error rate is part of the measurement — and memory is
+sampled continuously (100 ms cadence) for the whole interval, so
+between-sample spikes land in `memory.peakMB`.
 
 ## Time Profiler
 

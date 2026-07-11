@@ -15,6 +15,7 @@
 		4586B266B118B0FC7427730A /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9B78943245B1D4DEC2ACD27B /* PrivacyInfo.xcprivacy */; };
 		78BAF314095D16FE34C8A8A8 /* LocalAssistCore in Frameworks */ = {isa = PBXBuildFile; productRef = 42108E34E8F0B7008BE7CA0A /* LocalAssistCore */; };
 		8183F678E9F05A19A3A2D578 /* LocalAssistShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 100D19FDD93D7A4B36352C36 /* LocalAssistShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		8D44A9AB2D852C72B2E7E3C0 /* MeasurementColdLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60843C26977A1BB89DAE3F39 /* MeasurementColdLaunchTests.swift */; };
 		BFC076489D64683D42671182 /* LocalAssistAppIntents in Frameworks */ = {isa = PBXBuildFile; productRef = 1D86B0D8943AC4A670A007A5 /* LocalAssistAppIntents */; };
 		C89D06896B3FCB4F5D75F188 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 32FEAF10BB4DF8DFDDABB0F5 /* PrivacyInfo.xcprivacy */; };
 		D74C8C544761FB616FB4351C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 82FF1D7EC5282A4A756425EC /* Assets.xcassets */; };
@@ -73,6 +74,7 @@
 		530C6110899A20B711F3DE30 /* LocalAssistWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalAssistWidgets.swift; sourceTree = "<group>"; };
 		53DCCBE20696642DA66BD5DF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5ED7E8C53374413AB4397426 /* LocalAssist.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = LocalAssist.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		60843C26977A1BB89DAE3F39 /* MeasurementColdLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementColdLaunchTests.swift; sourceTree = "<group>"; };
 		82FF1D7EC5282A4A756425EC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		8C836322D2AF4B6293385B30 /* LocalAssistWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LocalAssistWidgets.entitlements; sourceTree = "<group>"; };
 		9B78943245B1D4DEC2ACD27B /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -159,6 +161,7 @@
 			isa = PBXGroup;
 			children = (
 				BAE675397235D553C07685C4 /* LocalAssistUITests.swift */,
+				60843C26977A1BB89DAE3F39 /* MeasurementColdLaunchTests.swift */,
 			);
 			name = LocalAssistUITests;
 			path = Apps/iOS/LocalAssistUITests;
@@ -388,6 +391,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F53990B52EB6928924B4AE6B /* LocalAssistUITests.swift in Sources */,
+				8D44A9AB2D852C72B2E7E3C0 /* MeasurementColdLaunchTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

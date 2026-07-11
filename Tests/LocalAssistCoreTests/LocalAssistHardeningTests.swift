@@ -302,6 +302,41 @@ final class LocalAssistDeadlineTests: XCTestCase {
         }
     }
 
+    func testDeadlineReleasesCallerWhenOperationCannotCancel() async {
+        // The reason the race is unstructured: a synchronous XPC call
+        // blocked inside a system daemon never checks Task.isCancelled. The
+        // caller must still get its DeadlineExceeded at the budget instead
+        // of waiting for the wedged call — the operation is abandoned.
+        let clock = ContinuousClock()
+        let started = clock.now
+        do {
+            _ = try await LocalAssistDeadline.run(.milliseconds(100), stage: "wedged-service") {
+                // Non-cooperative blocking work: ignores cancellation
+                // entirely and would hold a structured group for 30s.
+                var spun = 0
+                let blockUntil = ContinuousClock.now.advanced(by: .seconds(30))
+                while ContinuousClock.now < blockUntil {
+                    spun += 1
+                    if spun.isMultiple(of: 1_000_000) {
+                        // No cancellation check on purpose.
+                        await Task.yield()
+                    }
+                }
+                return spun
+            }
+            XCTFail("expected DeadlineExceeded")
+        } catch let deadline as DeadlineExceeded {
+            XCTAssertEqual(deadline.stage, "wedged-service")
+            let elapsed = started.duration(to: clock.now)
+            XCTAssertLessThan(
+                elapsed, .seconds(5),
+                "caller must be released at the budget, not when the wedged work ends"
+            )
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
     func testOuterCancellationPropagates() async {
         let task = Task {
             try await LocalAssistDeadline.run(.seconds(30), stage: "test") {

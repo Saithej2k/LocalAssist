@@ -4,6 +4,31 @@ All notable changes to LocalAssist are documented here.
 
 ## Unreleased
 
+### Measurement rigor (2026-07-11, follow-up)
+- Cohorts are now facts, not labels: `processCold` (no generation had
+  started in the process, per a process-wide generation registry),
+  `sessionCold` (fresh service, warm process), `warm` — only the true
+  first generation of a launch can be process-cold.
+- Genuine process-cold collection: launching with
+  `LOCALASSIST_MEASURE_PROCESS_COLD` runs exactly one sample as the
+  process's first generation and appends it to a durable JSONL outbox;
+  `MeasurementColdLaunchTests` drives ≥20 such relaunches on a connected
+  device and the next report folds them in. Launch automation is
+  suppressed on measurement launches so nothing generates first.
+- Failed samples are preserved with typed failure categories instead of
+  silently dropped — error rate is part of the measurement.
+- Memory is sampled continuously (100 ms cadence) for the whole
+  measurement interval; between-sample spikes now land in the reported
+  peak, alongside mean and sample count.
+- Action Review readiness is measured through the production
+  `LocalAssistWorker` orchestration (contact enrichment included), not a
+  preparer shortcut.
+- `LocalAssistDeadline` now releases the caller at the budget even when
+  the operation cannot observe cancellation (a sync XPC call wedged in a
+  system daemon): the race is deliberately unstructured and the stuck
+  task is abandoned — proven by a test that blocks uncooperatively for
+  30 s and still returns in ~100 ms.
+
 ### Production hardening (2026-07-11)
 - Briefs can be deleted: long-press a history card (or clear all) and the
   run leaves local history atomically with a durable Spotlight tombstone;

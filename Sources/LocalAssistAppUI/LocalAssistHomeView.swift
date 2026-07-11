@@ -292,6 +292,12 @@ extension LocalAssistHomeView {
         guard environment["LOCALASSIST_AUTO_RUN"] == "1" else {
             return
         }
+        // A process-cold measurement launch wants automation's quiet start
+        // (no onboarding, no Contacts dialog) but must not generate — the
+        // harness sample has to be the process's first generation.
+        guard !ProcessInfo.processInfo.arguments.contains("LOCALASSIST_MEASURE_PROCESS_COLD") else {
+            return
+        }
 
         didRunLaunchAutomation = true
         if viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

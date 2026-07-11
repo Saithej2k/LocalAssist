@@ -78,7 +78,8 @@ public struct LocalAssistService: Sendable {
     }
 
     public func streamSummary(_ request: AssistantRequest) -> AsyncThrowingStream<SummaryGenerationUpdate, Error> {
-        AsyncThrowingStream { continuation in
+        ProcessGenerationRegistry.recordGenerationStart()
+        return AsyncThrowingStream { continuation in
             let task = Task {
                 let emit: @Sendable (SummaryGenerationUpdate) -> Void = { update in
                     continuation.yield(update)

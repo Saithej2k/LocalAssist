@@ -6,6 +6,12 @@ import SwiftUI
 @main
 struct LocalAssistApp: App {
     @Environment(\.scenePhase) private var scenePhase
+    #if DEBUG
+        /// True once a `LOCALASSIST_MEASURE_PROCESS_COLD` launch finished
+        /// its single sample — surfaced as an accessibility marker so the
+        /// cold-launch XCUITest can wait on it instead of sleeping.
+        @State private var processColdSampleDone = false
+    #endif
 
     init() {
         // Crash/hang payloads from MetricKit, written to local files only —
@@ -24,6 +30,24 @@ struct LocalAssistApp: App {
                         await SpotlightDeletionCoordinator.live()?.processPending()
                     }
                 }
+                #if DEBUG
+                .task {
+                    // No-op unless the launch argument is set; when it is,
+                    // this is the process's first generation — the genuine
+                    // process-cold sample the warm-loop harness cannot make.
+                    if await DeviceMeasurementHarness.runProcessColdSampleIfRequested() {
+                        processColdSampleDone = true
+                    }
+                }
+                .overlay {
+                    if processColdSampleDone {
+                        Color.clear
+                            .frame(width: 1, height: 1)
+                            .accessibilityElement()
+                            .accessibilityIdentifier("measurement-cold-done")
+                    }
+                }
+                #endif
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else {
