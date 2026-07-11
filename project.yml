@@ -49,6 +49,22 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Apps/iOS/LocalAssist/LocalAssist.entitlements
         MARKETING_VERSION: "1.1"
         CURRENT_PROJECT_VERSION: "6"
+        # The stamping script below writes into the built product's plist.
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+    postBuildScripts:
+      - name: Stamp commit SHA
+        # Measurement provenance: RunEnvironment reads LocalAssistCommitSHA
+        # from the bundle, and cold-launch campaigns refuse claim-ready
+        # status without it. Stamped into the BUILT plist only — the
+        # source Info.plist stays clean of per-build values.
+        script: |
+          SHA=$(cd "$SRCROOT" && git rev-parse --short HEAD 2>/dev/null || echo "")
+          PLIST="${TARGET_BUILD_DIR}/${INFOPLIST_PATH}"
+          if [ -n "$SHA" ] && [ -f "$PLIST" ]; then
+            /usr/libexec/PlistBuddy -c "Set :LocalAssistCommitSHA $SHA" "$PLIST" 2>/dev/null \
+              || /usr/libexec/PlistBuddy -c "Add :LocalAssistCommitSHA string $SHA" "$PLIST"
+          fi
+        basedOnDependencyAnalysis: false
 
   LocalAssistWidgets:
     type: app-extension

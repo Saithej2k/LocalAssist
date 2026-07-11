@@ -63,22 +63,26 @@ public enum LocalAssistDeadline {
                 // registered: the outer task may have been cancelled before
                 // the handler could see any tasks, and the operation may
                 // have finished before the holder was populated (its
-                // timeout-cancel would have read nil).
+                // timeout-cancel would have read nil). In both branches the
+                // cancels are unconditional — whoever settled the gate, a
+                // losing task must not keep running toward a later side
+                // effect.
                 if Task.isCancelled {
-                    if gate.resume(with: .failure(CancellationError())) {
-                        operationTask.cancel()
-                    }
+                    gate.resume(with: .failure(CancellationError()))
+                    operationTask.cancel()
                     timeoutTask.cancel()
                 } else if gate.isSettled {
+                    operationTask.cancel()
                     timeoutTask.cancel()
                 }
             }
         } onCancel: {
             // Explicit release: the caller gets CancellationError from the
-            // gate even when the operation never cooperates.
-            if gate.resume(with: .failure(CancellationError())) {
-                holder.cancelAll()
-            }
+            // gate even when the operation never cooperates. Cancel both
+            // tasks unconditionally — even when another racer already
+            // settled the gate, the losers must stop working.
+            gate.resume(with: .failure(CancellationError()))
+            holder.cancelAll()
         }
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import XCTest
 @testable import LocalAssistCore
 
@@ -300,6 +301,62 @@ final class LocalAssistDeadlineTests: XCTestCase {
         } catch {
             XCTFail("unexpected error: \(error)")
         }
+    }
+
+    /// Shared flag for side-effect probes.
+    private final class SideEffect: Sendable {
+        private let fired = Mutex(false)
+        func set() { fired.withLock { $0 = true } }
+        var didFire: Bool { fired.withLock { $0 } }
+    }
+
+    func testLosingCooperativeOperationPerformsNoSideEffectAfterTimeout() async throws {
+        // The timeout wins immediately; the cooperative operation must be
+        // cancelled by the winner and never reach its side effect.
+        let sideEffect = SideEffect()
+        do {
+            _ = try await LocalAssistDeadline.run(.milliseconds(1), stage: "instant-timeout") {
+                try await Task.sleep(for: .milliseconds(200))
+                sideEffect.set()
+                return 1
+            }
+            XCTFail("expected DeadlineExceeded")
+        } catch is DeadlineExceeded {
+            // expected
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+        // Give a not-cancelled operation ample time to have fired.
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertFalse(
+            sideEffect.didFire,
+            "the losing operation was cancelled by the winning timeout — no late side effect"
+        )
+    }
+
+    func testLosingCooperativeOperationPerformsNoSideEffectAfterOuterCancel() async throws {
+        let sideEffect = SideEffect()
+        let task = Task {
+            try await LocalAssistDeadline.run(.seconds(30), stage: "outer-cancel") {
+                try await Task.sleep(for: .milliseconds(200))
+                sideEffect.set()
+                return 1
+            }
+        }
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("expected cancellation")
+        } catch is CancellationError {
+            // expected
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertFalse(
+            sideEffect.didFire,
+            "the cancelled caller's operation was cancelled too — no late side effect"
+        )
     }
 
     func testDeadlineReleasesCallerWhenOperationCannotCancel() async {

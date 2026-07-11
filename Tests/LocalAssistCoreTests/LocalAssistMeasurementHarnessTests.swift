@@ -14,6 +14,21 @@ private func measurementWorker() -> LocalAssistWorker {
     ]))
 }
 
+/// Model client whose stream dies with a cancellation — the one failure the
+/// service rethrows instead of absorbing into the deterministic fallback,
+/// so `summarize` genuinely throws.
+private struct CancellingModelClient: StructuredModelClient {
+    func availability() async -> ModelAvailability {
+        .available
+    }
+
+    func streamSummary(for _: AssistantRequest) -> AsyncThrowingStream<StructuredSummaryPartial, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.finish(throwing: CancellationError())
+        }
+    }
+}
+
 /// Device-measurement harness semantics that must hold before phone data
 /// is trusted: cohort assignment, failure preservation, continuous memory
 /// sampling, and the process-cold outbox round trip.
@@ -56,7 +71,7 @@ final class LocalAssistMeasurementHarnessTests: XCTestCase {
         XCTAssertGreaterThan(ProcessGenerationRegistry.generationsStarted(), before)
     }
 
-    func testRunProducesOnlyWarmSamplesAfterUnmeasuredWarmup() async {
+    func testRunProducesOnlyWarmSamplesAfterSuccessfulWarmup() async {
         let before = ProcessGenerationRegistry.generationsStarted()
         let report = await DeviceMeasurementHarness.run(
             configuration: .init(repetitions: 1, useModel: false),
@@ -66,15 +81,51 @@ final class LocalAssistMeasurementHarnessTests: XCTestCase {
         // and is empty — the field is part of the contract, not pruned.
         XCTAssertEqual(report.samples.count, EvalDataset.standard.count)
         XCTAssertTrue(report.failedSamples.isEmpty)
-        // The warmup consumed the session-cold generation, so the claim
+        // The warmup succeeded from the expected engine, so the claim
         // "N warm runs" is honest: every sample is warm, none mislabeled.
-        XCTAssertTrue(report.unmeasuredWarmupPerformed)
+        XCTAssertEqual(report.warmupOutcome, .succeeded(source: .deterministicFallback))
         XCTAssertTrue(report.samples.allSatisfy { $0.cohort == .warm })
         // Warmup generation + one per case hit the process registry.
         XCTAssertGreaterThanOrEqual(
             ProcessGenerationRegistry.generationsStarted() - before,
             EvalDataset.standard.count + 1
         )
+    }
+
+    func testWrongSourceWarmupAbortsWarmCohort() async {
+        // Configuration says Foundation Models, but the injected service
+        // answers deterministically — the exact shape of measuring "warm
+        // model latency" on a device where the model silently fell back.
+        // No sample may carry a warm-model label.
+        let report = await DeviceMeasurementHarness.run(
+            configuration: .init(repetitions: 1, useModel: true),
+            worker: await measurementWorker(),
+            service: LocalAssistService()
+        )
+        XCTAssertEqual(
+            report.warmupOutcome,
+            .wrongSource(expected: .foundationModels, actual: .deterministicFallback)
+        )
+        XCTAssertTrue(report.samples.isEmpty, "no claimable samples from a wrong-source warmup")
+        XCTAssertTrue(report.failedSamples.isEmpty, "the cohort was aborted, not failed")
+        XCTAssertFalse(report.warmupOutcome.isClaimable)
+    }
+
+    func testFailedWarmupAbortsWarmCohortWithTypedCategory() async {
+        // A model whose stream dies with a cancellation rethrows out of
+        // summarize — the one failure the service does not absorb into the
+        // deterministic fallback.
+        let cancellingService = LocalAssistService(
+            model: CancellingModelClient()
+        )
+        let report = await DeviceMeasurementHarness.run(
+            configuration: .init(repetitions: 1, useModel: true),
+            worker: await measurementWorker(),
+            service: cancellingService
+        )
+        XCTAssertEqual(report.warmupOutcome, .failed(category: "cancelled"))
+        XCTAssertTrue(report.samples.isEmpty)
+        XCTAssertFalse(report.warmupOutcome.isClaimable)
     }
 
     func testMemoryProfileSamplesContinuously() async {
@@ -194,10 +245,21 @@ final class LocalAssistMeasurementHarnessTests: XCTestCase {
             try ColdLaunchCampaignStore.append(
                 self.record(campaignID: campaign.id, expected: .foundationModels, classification: .sample)
             )
-            // Simulate a stale line from an older campaign on disk.
-            var stale = try JSONEncoder().encode(
+            // Simulate a stale line from an older campaign on disk, encoded
+            // exactly as the store encodes (.iso8601 dates) — the point is
+            // that the CAMPAIGN-ID FILTER excludes it, not a decode failure.
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            var stale = try encoder.encode(
                 self.record(campaignID: "old-campaign", expected: .foundationModels, classification: .sample)
             )
+            // Prove the stale line is decodable with the store's decoder
+            // settings before relying on exclusion.
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let decodedStale = try decoder.decode(ColdLaunchCampaignStore.Record.self, from: stale)
+            XCTAssertEqual(decodedStale.campaignID, "old-campaign")
+
             stale.append(Data("\n".utf8))
             let handle = try FileHandle(forWritingTo: ColdLaunchCampaignStore.recordsURL)
             try handle.seekToEnd()
@@ -206,7 +268,7 @@ final class LocalAssistMeasurementHarnessTests: XCTestCase {
 
             XCTAssertEqual(
                 ColdLaunchCampaignStore.records(for: campaign).count, 1,
-                "records from other campaigns are excluded, never averaged in"
+                "the decodable foreign record is excluded by campaign ID, never averaged in"
             )
         }
     }

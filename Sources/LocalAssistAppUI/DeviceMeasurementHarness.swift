@@ -78,6 +78,25 @@
             public var detectionToCompletionMilliseconds: Double
         }
 
+        /// What the unmeasured warmup actually did. Warm samples are
+        /// claimable only after `.succeeded` from the configuration's
+        /// expected source — a warmup that failed, or that answered from
+        /// the wrong engine (deterministic fallback in a Foundation Models
+        /// run), means the "warm" label would be a guess, so the warm
+        /// cohort is aborted instead of collected.
+        public enum WarmupOutcome: Codable, Equatable, Sendable {
+            case succeeded(source: GenerationSource)
+            case wrongSource(expected: GenerationSource, actual: GenerationSource)
+            case failed(category: String)
+
+            public var isClaimable: Bool {
+                if case .succeeded = self {
+                    return true
+                }
+                return false
+            }
+        }
+
         /// 100 ms periodic footprint sampling over the measurement
         /// interval. Periodic, not continuous: a spike shorter than the
         /// sampling interval can be missed — the true peak requires
@@ -99,9 +118,11 @@
             public var failedSamples: [FailedSample]
             public var fallbackSamples: [FallbackSample]
             public var memory: MemoryProfile
-            /// One unmeasured session-cold generation ran before sampling,
-            /// so every sample above is genuinely warm.
-            public var unmeasuredWarmupPerformed: Bool
+            /// The unmeasured session-cold warmup's outcome. Samples exist
+            /// above only when this is `.succeeded` from the expected
+            /// source; otherwise the warm cohort was aborted and this
+            /// field says why.
+            public var warmupOutcome: WarmupOutcome
             /// The active cold-launch campaign and its records, when one
             /// exists. Only records carrying this campaign's ID are
             /// included — different campaigns never fold together.
@@ -124,44 +145,66 @@
         /// orchestration (contact enrichment + preparation) the app runs
         /// after every generation, not a preparer shortcut. Tests inject a
         /// worker with a static contact resolver so no TCC-gated system
-        /// service sits in the loop on a headless runner.
+        /// service sits in the loop on a headless runner, and may inject a
+        /// scripted `service` to exercise warmup failure paths.
         public static func run(
             configuration: Configuration = Configuration(),
-            worker: LocalAssistWorker = LocalAssistWorker()
+            worker: LocalAssistWorker = LocalAssistWorker(),
+            service injectedService: LocalAssistService? = nil
         ) async -> Report {
             let startedAt = Date()
-            let service: LocalAssistService = configuration.useModel
-                ? LocalAssistLiveFactory.makeService(tools: LocalAssistToolkit.liveTools())
-                : LocalAssistService()
+            let service: LocalAssistService = injectedService
+                ?? (configuration.useModel
+                    ? LocalAssistLiveFactory.makeService(tools: LocalAssistToolkit.liveTools())
+                    : LocalAssistService())
 
             let monitor = MemoryMonitor()
             monitor.start()
 
             // One unmeasured warmup consumes the session-cold (or
-            // process-cold) first generation, so every measured sample is
-            // genuinely warm — cases × repetitions warm runs, no mislabeled
-            // first sample. Cold statistics come from the cold-launch
-            // campaign, not from here.
-            _ = try? await service.summarize(AssistantRequest(
-                sourceText: EvalDataset.standard[0].input,
-                maxSuggestions: EvalDataset.standard[0].maxSuggestions
-            ))
+            // process-cold) first generation. Only a warmup that SUCCEEDS
+            // from the expected engine earns the samples their "warm"
+            // label — a failed or wrong-source warmup aborts the warm
+            // cohort instead of collecting numbers the label would lie
+            // about. Cold statistics come from the cold-launch campaign,
+            // not from here.
+            let expectedSource: GenerationSource = configuration.useModel
+                ? .foundationModels
+                : .deterministicFallback
+            let warmupOutcome: WarmupOutcome
+            do {
+                let warmupSummary = try await service.summarize(AssistantRequest(
+                    sourceText: EvalDataset.standard[0].input,
+                    maxSuggestions: EvalDataset.standard[0].maxSuggestions
+                ))
+                warmupOutcome = warmupSummary.source == expectedSource
+                    ? .succeeded(source: warmupSummary.source)
+                    : .wrongSource(expected: expectedSource, actual: warmupSummary.source)
+            } catch let failure as GenerationFailure {
+                warmupOutcome = .failed(category: failure.category)
+            } catch {
+                warmupOutcome = .failed(
+                    category: error is CancellationError ? "cancelled" : "untyped"
+                )
+            }
 
             var samples: [Sample] = []
             var failures: [FailedSample] = []
-            for evalCase in EvalDataset.standard {
-                for repetition in 0 ..< configuration.repetitions {
-                    switch await measureOne(
-                        evalCase: evalCase,
-                        repetition: repetition,
-                        cohort: .warm,
-                        service: service,
-                        worker: worker
-                    ) {
-                    case .success(let sample):
-                        samples.append(sample)
-                    case .failure(let failed):
-                        failures.append(failed)
+            if warmupOutcome.isClaimable {
+                for evalCase in EvalDataset.standard {
+                    for repetition in 0 ..< configuration.repetitions {
+                        switch await measureOne(
+                            evalCase: evalCase,
+                            repetition: repetition,
+                            cohort: .warm,
+                            service: service,
+                            worker: worker
+                        ) {
+                        case .success(let sample):
+                            samples.append(sample)
+                        case .failure(let failed):
+                            failures.append(failed)
+                        }
                     }
                 }
             }
@@ -181,11 +224,12 @@
                 failedSamples: failures,
                 fallbackSamples: fallbackSamples,
                 memory: memory,
-                unmeasuredWarmupPerformed: true,
+                warmupOutcome: warmupOutcome,
                 coldLaunchCampaign: ColdLaunchCampaignStore.summaryOfActiveCampaign(),
                 caveats: [
-                    "warm samples only: one unmeasured warmup consumed the session-cold generation; "
-                        + "cold statistics come from the cold-launch campaign "
+                    "warm samples exist only when warmupOutcome is .succeeded from the expected "
+                        + "engine; a failed or wrong-source warmup aborts the warm cohort. "
+                        + "Cold statistics come from the cold-launch campaign "
                         + "(LOCALASSIST_MEASURE_PROCESS_COLD launches, MeasurementColdLaunchTests)",
                     "20 cold launches support an aggregate cold p95 only; "
                         + "per-case cold percentiles need 20 launches per case (160 total)",

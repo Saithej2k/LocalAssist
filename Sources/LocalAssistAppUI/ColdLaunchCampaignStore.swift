@@ -26,6 +26,14 @@
             /// What the campaign intends to measure. A sample from any
             /// other source is classified `unexpectedSource`.
             public var expectedSource: GenerationSource
+
+            /// A campaign without a commit SHA cannot say which code it
+            /// measured — its numbers stay unclaimed. The app stamps
+            /// `LocalAssistCommitSHA` into device builds; XCUITest launches
+            /// forward `LOCALASSIST_COMMIT_SHA` per the documented command.
+            public var isClaimReady: Bool {
+                environment.commitSHA?.isEmpty == false
+            }
         }
 
         public enum Classification: String, Codable, Sendable {
@@ -55,6 +63,10 @@
             public var samples: [DeviceMeasurementHarness.Sample]
             public var unexpectedSourceSamples: [DeviceMeasurementHarness.Sample]
             public var failures: [DeviceMeasurementHarness.FailedSample]
+            /// False when the campaign lacks a commit SHA — the samples
+            /// are preserved but must not be quoted as measurements of any
+            /// particular build.
+            public var claimReady: Bool
         }
 
         public enum CampaignError: Error, Equatable {
@@ -191,7 +203,8 @@
                 samples: all.filter { $0.classification == .sample }.compactMap(\.sample),
                 unexpectedSourceSamples: all.filter { $0.classification == .unexpectedSource }
                     .compactMap(\.sample),
-                failures: all.filter { $0.classification == .failure }.compactMap(\.failure)
+                failures: all.filter { $0.classification == .failure }.compactMap(\.failure),
+                claimReady: campaign.isClaimReady
             )
         }
     }

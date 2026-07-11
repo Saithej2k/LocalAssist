@@ -39,11 +39,27 @@ samples — "160 warm runs" with no mislabeled first sample. Cold numbers
 never come from that run; they come from a **cold-launch campaign**:
 
 ```bash
-LOCALASSIST_COLD_LAUNCHES=20 xcodebuild test \
+TEST_RUNNER_LOCALASSIST_COMMIT_SHA=$(git rev-parse --short HEAD) \
+TEST_RUNNER_LOCALASSIST_COLD_LAUNCHES=20 \
+xcodebuild test \
   -project LocalAssist.xcodeproj -scheme LocalAssist \
   -destination 'platform=iOS,name=<your iPhone>' \
   -only-testing:LocalAssistUITests/MeasurementColdLaunchTests
 ```
+
+(`xcodebuild` forwards only `TEST_RUNNER_`-prefixed variables. The app
+build also stamps `LocalAssistCommitSHA` into its Info.plist via a build
+script, so Settings-button runs carry the SHA without any environment.
+**A campaign whose environment has no commit SHA is not claim-ready** —
+its numbers cannot say which code they measured, and the report's
+`claimReady: false` marks them unquotable.)
+
+The in-app harness's warm cohort is equally gated: warm samples exist in
+a report only when `warmupOutcome` is `.succeeded` from the
+configuration's expected engine. A warmup that failed, or that answered
+from the deterministic fallback when the run intended to measure
+Foundation Models, aborts the warm cohort — there is no such thing as a
+"warm model sample" the model never produced.
 
 The first launch resets and begins a campaign — an envelope pinning
 campaign ID, timestamp, device, OS, build configuration, commit SHA, and
