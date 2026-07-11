@@ -179,35 +179,44 @@ struct LocalAssistSpeechEvalCommand {
 
             var results: [SpeechCaseResult] = []
             for utterance in utterances {
-                let (transcript, asrMilliseconds) = try await transcribe(
+                let transcription = try await transcribe(
                     url: utterance.audioURL,
                     locale: locale
                 )
+                // Ablation ladder, one variable at a time:
+                //   gold text → full accumulator → name-corrected → finals-only.
+                // The accumulator output is the app path; the corrected pass
+                // measures what a contact-aware resolver claws back; the
+                // finals-only pass prices a lost volatile tail.
+                let accumulatorTranscript = transcription.accumulator
+                let finalOnlyTranscript = transcription.finalsOnly
+                let resolver = ProperNounResolver(contactNames: utterance.evalCase.properNouns)
+                let correctedTranscript = resolver.resolveTranscript(accumulatorTranscript).text
+
                 let wordErrorRate = WordErrorRate.measure(
                     reference: utterance.spoken,
-                    hypothesis: transcript
+                    hypothesis: accumulatorTranscript
+                )
+                let correctedWordErrorRate = WordErrorRate.measure(
+                    reference: utterance.spoken,
+                    hypothesis: correctedTranscript
+                )
+                let finalOnlyWordErrorRate = WordErrorRate.measure(
+                    reference: utterance.spoken,
+                    hypothesis: finalOnlyTranscript
                 )
 
-                // Downstream: the transcript through the real pipeline, and
-                // the spoken text as the same-pipeline ceiling.
-                let speechSummary = try await service.summarize(AssistantRequest(
-                    sourceText: transcript.isEmpty ? " " : transcript,
-                    maxSuggestions: utterance.evalCase.maxSuggestions
-                ))
-                let speechScore = EvalScorer.score(
-                    summary: speechSummary,
-                    against: utterance.evalCase,
-                    latencyMilliseconds: 0
-                )
-                let textSummary = try await service.summarize(AssistantRequest(
-                    sourceText: utterance.spoken,
-                    maxSuggestions: utterance.evalCase.maxSuggestions
-                ))
-                let textScore = EvalScorer.score(
-                    summary: textSummary,
-                    against: utterance.evalCase,
-                    latencyMilliseconds: 0
-                )
+                func composite(of text: String) async throws -> Double {
+                    let summary = try await service.summarize(AssistantRequest(
+                        sourceText: text.isEmpty ? " " : text,
+                        maxSuggestions: utterance.evalCase.maxSuggestions
+                    ))
+                    return EvalScorer.score(
+                        summary: summary,
+                        against: utterance.evalCase,
+                        latencyMilliseconds: 0
+                    ).composite
+                }
 
                 results.append(SpeechCaseResult(
                     caseID: utterance.evalCase.id,
@@ -215,11 +224,15 @@ struct LocalAssistSpeechEvalCommand {
                     substitutions: wordErrorRate.substitutions,
                     deletions: wordErrorRate.deletions,
                     insertions: wordErrorRate.insertions,
-                    transcript: transcript,
+                    transcript: accumulatorTranscript,
                     synthMilliseconds: utterance.synthMilliseconds,
-                    asrMilliseconds: asrMilliseconds,
-                    speechComposite: speechScore.composite,
-                    textComposite: textScore.composite
+                    asrMilliseconds: transcription.asrMilliseconds,
+                    speechComposite: try await composite(of: accumulatorTranscript),
+                    textComposite: try await composite(of: utterance.spoken),
+                    correctedWordErrorRate: correctedWordErrorRate.rate,
+                    correctedComposite: try await composite(of: correctedTranscript),
+                    finalOnlyWordErrorRate: finalOnlyWordErrorRate.rate,
+                    finalOnlyComposite: try await composite(of: finalOnlyTranscript)
                 ))
             }
 
@@ -248,27 +261,45 @@ struct LocalAssistSpeechEvalCommand {
             }
         }
 
+        /// One transcription pass, two views of it: finals folded through
+        /// `DictationAccumulator` exactly as the mic path does (volatile
+        /// results included, trailing volatile folded at end-of-stream), and
+        /// the finals-only ablation that prices a lost volatile tail.
+        struct TranscriptionResult: Sendable {
+            var accumulator: String
+            var finalsOnly: String
+            var asrMilliseconds: Double
+        }
+
         /// Fresh transcriber and analyzer per utterance — the same lifecycle
         /// rule the mic path learned on device: a reused analyzer yields
         /// nothing.
-        private static func transcribe(url: URL, locale: Locale) async throws -> (String, Double) {
+        private static func transcribe(url: URL, locale: Locale) async throws -> TranscriptionResult {
             let transcriber = SpeechTranscriber(
                 locale: locale,
                 transcriptionOptions: [],
-                reportingOptions: [],
+                reportingOptions: [.volatileResults],
                 attributeOptions: []
             )
             let analyzer = SpeechAnalyzer(modules: [transcriber])
             let file = try AVAudioFile(forReading: url)
             let start = ContinuousClock.now
 
-            return try await withThrowingTaskGroup(of: String?.self) { group in
+            return try await withThrowingTaskGroup(of: (String, String)?.self) { group in
                 group.addTask {
-                    var text = ""
-                    for try await result in transcriber.results where result.isFinal {
-                        text += String(result.text.characters)
+                    var accumulator = DictationAccumulator()
+                    var finalsOnly = ""
+                    for try await result in transcriber.results {
+                        let text = String(result.text.characters)
+                        if result.isFinal {
+                            accumulator.finalizeSegment(text)
+                            finalsOnly += text
+                        } else {
+                            accumulator.updatePartial(text)
+                        }
                     }
-                    return text
+                    accumulator.endSegmentWithoutFinal()
+                    return (accumulator.transcript, finalsOnly)
                 }
                 group.addTask {
                     if let last = try await analyzer.analyzeSequence(from: file) {
@@ -276,15 +307,17 @@ struct LocalAssistSpeechEvalCommand {
                     }
                     return nil
                 }
-                var transcript = ""
+                var accumulated = ""
+                var finals = ""
                 for try await value in group {
                     if let value {
-                        transcript = value
+                        (accumulated, finals) = value
                     }
                 }
-                return (
-                    transcript.trimmingCharacters(in: .whitespacesAndNewlines),
-                    start.millisecondsToNow
+                return TranscriptionResult(
+                    accumulator: accumulated.trimmingCharacters(in: .whitespacesAndNewlines),
+                    finalsOnly: finals.trimmingCharacters(in: .whitespacesAndNewlines),
+                    asrMilliseconds: start.millisecondsToNow
                 )
             }
         }
@@ -378,6 +411,7 @@ struct SpeechEvalArguments {
 
 struct SpeechCaseResult: Codable, Equatable, Sendable {
     var caseID: String
+    /// Full-accumulator output — the app's actual mic path.
     var wordErrorRate: Double
     var substitutions: Int
     var deletions: Int
@@ -385,8 +419,17 @@ struct SpeechCaseResult: Codable, Equatable, Sendable {
     var transcript: String
     var synthMilliseconds: Double
     var asrMilliseconds: Double
+    /// Task composite on the full-accumulator transcript.
     var speechComposite: Double
+    /// Task composite on the gold (spoken) text — the pipeline ceiling.
     var textComposite: Double
+    /// Ablation: accumulator transcript after contact-aware proper-noun
+    /// correction.
+    var correctedWordErrorRate: Double
+    var correctedComposite: Double
+    /// Ablation: finalized results only, pricing a lost volatile tail.
+    var finalOnlyWordErrorRate: Double
+    var finalOnlyComposite: Double
 }
 
 struct SpeechEvalReport: Codable, Equatable, Sendable {
@@ -435,18 +478,26 @@ struct SpeechEvalReport: Codable, Equatable, Sendable {
             "- Synthetic audio caveat: TTS is cleaner than a human speaker;"
                 + " treat WER as an upper bound and a regression tripwire.",
             "",
-            "| Case | WER | Sub | Del | Ins | ASR (ms) | Speech score | Text score | Δ |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+            "Ablations per case: gold text (ceiling) → full accumulator (app"
+                + " path) → proper-name-corrected → finals-only (lost volatile"
+                + " tail).",
+            "",
+            "| Case | WER | Corr WER | Final WER | Sub | Del | Ins | ASR (ms) "
+                + "| Speech | Corrected | Final-only | Gold |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
 
         for result in caseResults {
-            let delta = result.speechComposite - result.textComposite
             lines.append(
                 "| \(result.caseID) | \(result.wordErrorRate.scoreString) "
+                    + "| \(result.correctedWordErrorRate.scoreString) "
+                    + "| \(result.finalOnlyWordErrorRate.scoreString) "
                     + "| \(result.substitutions) | \(result.deletions) | \(result.insertions) "
                     + "| \(result.asrMilliseconds.formatted2) "
-                    + "| \(result.speechComposite.scoreString) | \(result.textComposite.scoreString) "
-                    + "| \(delta.scoreString) |"
+                    + "| \(result.speechComposite.scoreString) "
+                    + "| \(result.correctedComposite.scoreString) "
+                    + "| \(result.finalOnlyComposite.scoreString) "
+                    + "| \(result.textComposite.scoreString) |"
             )
         }
 

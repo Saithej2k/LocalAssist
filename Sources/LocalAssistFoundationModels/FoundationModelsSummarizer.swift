@@ -29,6 +29,12 @@ public actor FoundationModelsSummarizer: StructuredModelClient {
     private var completedTurnsInSession = 0
     private var estimatedTranscriptCharacters = 0
     private var memory: ConversationMemory
+    /// Context-window bookkeeping across the current conversation, exposed
+    /// per run via `contextDiagnostics()` and recorded into `RunMetrics`.
+    private var proactiveRebuildCount = 0
+    private var overflowCount = 0
+    private var lastOverflowRetrySucceeded: Bool?
+    private var lastPromptCharacters = 0
     /// Prewarmed single-turn session for the next direct command, plus the
     /// day its instructions were dated — see `consumeRoutingSession`.
     private var routingSession: LanguageModelSession?
@@ -111,6 +117,39 @@ public actor FoundationModelsSummarizer: StructuredModelClient {
         completedTurnsInSession = 0
         estimatedTranscriptCharacters = 0
         memory.clear()
+        proactiveRebuildCount = 0
+        overflowCount = 0
+        lastOverflowRetrySucceeded = nil
+    }
+
+    /// Context-window bookkeeping for the just-completed run. Counters are
+    /// per conversation and reset with it.
+    public func contextDiagnostics() -> ContextWindowDiagnostics {
+        ContextWindowDiagnostics(
+            estimatedPromptCharacters: lastPromptCharacters,
+            estimatedTranscriptCharacters: estimatedTranscriptCharacters,
+            retainedExchanges: memory.exchanges.count,
+            proactiveRebuildCount: proactiveRebuildCount,
+            overflowCount: overflowCount,
+            overflowRetrySucceeded: lastOverflowRetrySucceeded
+        )
+    }
+
+    /// Memory-pressure response: sheds every idle model session while
+    /// keeping `ConversationMemory` — the sessions are rebuildable from the
+    /// condensed digest, so a refinement after pressure still knows the
+    /// conversation. A session mid-response is left alone; cancelling the
+    /// user's in-flight run to save memory would be backwards.
+    public func releaseInactiveSessions() {
+        if let session, !session.isResponding {
+            self.session = nil
+            completedTurnsInSession = 0
+            estimatedTranscriptCharacters = 0
+        }
+        if let routingSession, !routingSession.isResponding {
+            self.routingSession = nil
+            routingSessionDay = ""
+        }
     }
 
     // MARK: - Message composition
@@ -178,36 +217,11 @@ public actor FoundationModelsSummarizer: StructuredModelClient {
         }
 
         let prompt = Self.prompt(for: request)
-
-        // A new capture is a new conversation. The shared session exists for
-        // the refine turns that follow a capture — but a live run dumped
-        // four fresh commands and got back a task from the PREVIOUS capture,
-        // because the old exchange still sat in the transcript and read as
-        // content. Refinement keeps the conversation; a fresh capture starts
-        // one.
-        if !request.isRefinement, completedTurnsInSession > 0 {
-            resetConversation()
-        }
-
-        // Condense proactively instead of waiting for the overflow error.
-        let projected = estimatedTranscriptCharacters + prompt.count
-        if projected > transcriptCharacterBudget, completedTurnsInSession > 0 {
-            rebuildSessionWithCondensedContext()
-        }
-
-        // A LanguageModelSession serves one request at a time. Overlapping
-        // callers get a fresh single-turn session instead of a
-        // `concurrentRequests` failure.
-        let sharedSession = activeSession()
-        let session: LanguageModelSession
-        let usesSharedSession: Bool
-        if sharedSession.isResponding {
-            session = makeSession(condensedContext: memory.condensedContext())
-            usesSharedSession = false
-        } else {
-            session = sharedSession
-            usesSharedSession = true
-        }
+        let (session, usesSharedSession) = preparedSession(
+            for: request,
+            prompt: prompt,
+            isRetryAfterOverflow: isRetryAfterOverflow
+        )
 
         do {
             try Task.checkCancellation()
@@ -233,14 +247,20 @@ public actor FoundationModelsSummarizer: StructuredModelClient {
                 estimatedTranscriptCharacters += prompt.count + 1200
                 recordExchange(request: request, summary: response.content)
             }
+            if isRetryAfterOverflow {
+                lastOverflowRetrySucceeded = true
+            }
 
             continuation.yield(response.content.corePartial)
             continuation.finish()
         } catch is CancellationError {
             continuation.finish(throwing: CancellationError())
         } catch let error as LanguageModelSession.GenerationError {
-            if case .exceededContextWindowSize = error, usesSharedSession, !isRetryAfterOverflow {
-                rebuildSessionWithCondensedContext()
+            if shouldRetryAfterOverflow(
+                error,
+                usesSharedSession: usesSharedSession,
+                isRetryAfterOverflow: isRetryAfterOverflow
+            ) {
                 await run(request: request, continuation: continuation, isRetryAfterOverflow: true)
                 return
             }
@@ -253,6 +273,64 @@ public actor FoundationModelsSummarizer: StructuredModelClient {
         } catch {
             continuation.finish(throwing: GenerationFailure.unknown(detail: String(describing: error)))
         }
+    }
+
+    /// Session selection + context bookkeeping for one run.
+    ///
+    /// A new capture is a new conversation. The shared session exists for
+    /// the refine turns that follow a capture — but a live run dumped
+    /// four fresh commands and got back a task from the PREVIOUS capture,
+    /// because the old exchange still sat in the transcript and read as
+    /// content. Refinement keeps the conversation; a fresh capture starts
+    /// one. Sessions condense proactively ahead of a projected overflow,
+    /// and a busy shared session hands overlapping callers a fresh
+    /// single-turn session instead of a `concurrentRequests` failure.
+    private func preparedSession(
+        for request: AssistantRequest,
+        prompt: String,
+        isRetryAfterOverflow: Bool
+    ) -> (session: LanguageModelSession, usesSharedSession: Bool) {
+        if !request.isRefinement, completedTurnsInSession > 0 {
+            resetConversation()
+        }
+
+        lastPromptCharacters = prompt.count
+        if !isRetryAfterOverflow {
+            lastOverflowRetrySucceeded = nil
+        }
+
+        let projected = estimatedTranscriptCharacters + prompt.count
+        if projected > transcriptCharacterBudget, completedTurnsInSession > 0 {
+            rebuildSessionWithCondensedContext()
+            proactiveRebuildCount += 1
+        }
+
+        let sharedSession = activeSession()
+        if sharedSession.isResponding {
+            return (makeSession(condensedContext: memory.condensedContext()), false)
+        }
+        return (sharedSession, true)
+    }
+
+    /// Overflow bookkeeping + the single-retry policy: true means the
+    /// session was rebuilt with a condensed digest and the request should
+    /// run once more. A second overflow records the failed retry and falls
+    /// through to the typed failure.
+    private func shouldRetryAfterOverflow(
+        _ error: LanguageModelSession.GenerationError,
+        usesSharedSession: Bool,
+        isRetryAfterOverflow: Bool
+    ) -> Bool {
+        guard case .exceededContextWindowSize = error else {
+            return false
+        }
+        overflowCount += 1
+        if usesSharedSession, !isRetryAfterOverflow {
+            rebuildSessionWithCondensedContext()
+            return true
+        }
+        lastOverflowRetrySucceeded = false
+        return false
     }
 
     private func recordExchange(request: AssistantRequest, summary: DailyBrief) {

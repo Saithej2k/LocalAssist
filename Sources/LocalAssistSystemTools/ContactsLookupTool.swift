@@ -74,7 +74,15 @@ public struct ContactsLookupTool: FoundationModels.Tool {
     public func call(arguments: Arguments) async throws -> String {
         await counter?.increment()
 
-        let matches = try await resolver.contacts(matching: arguments.personName)
+        // Bounded like the other tools: a stalled Contacts query fails the
+        // tool call rather than stalling generation.
+        let contactResolver = resolver
+        let personName = arguments.personName
+        let matches = try await LocalAssistDeadline.run(
+            .seconds(8),
+            stage: "contacts-lookup-tool",
+            operation: { try await contactResolver.contacts(matching: personName) }
+        )
         guard !matches.isEmpty else {
             return "No contact named '\(arguments.personName)' was found. Refer to them exactly as the note does."
         }

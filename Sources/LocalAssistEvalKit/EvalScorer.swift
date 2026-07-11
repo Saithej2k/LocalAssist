@@ -20,32 +20,12 @@ public enum EvalScorer {
     public static func score(
         summary: StructuredSummary,
         against evalCase: EvalCase,
-        latencyMilliseconds: Double
+        latencyMilliseconds: Double,
+        calendar: Calendar = .current,
+        now: Date = Date()
     ) -> EvalCaseResult {
         var notes: [String] = []
-
-        // Structure: the contract the app promises downstream consumers.
-        var structureChecks = 0.0
-        var structurePassed = 0.0
-        func check(_ name: String, _ passed: Bool) {
-            structureChecks += 1
-            if passed {
-                structurePassed += 1
-            } else {
-                notes.append("structure: \(name) failed")
-            }
-        }
-        check("overview non-empty", !summary.overview.isEmpty)
-        check("overview <= 200 chars", summary.overview.count <= 200)
-        check("1-5 key points", (1 ... 5).contains(summary.keyPoints.count))
-        check("suggestion cap", summary.suggestions.count <= evalCase.maxSuggestions)
-        check("unique suggestion ids", Set(summary.suggestions.map(\.id)).count == summary.suggestions.count)
-        check("drafts match suggestions", summary.actionDrafts.count == summary.suggestions.count)
-        check(
-            "confidence in range",
-            summary.suggestions.allSatisfy { (0.0 ... 1.0).contains($0.confidence) }
-        )
-        let structureScore = structureChecks > 0 ? structurePassed / structureChecks : 1
+        let structureScore = structureScore(of: summary, against: evalCase, notes: &notes)
 
         // Task recall + attribute accuracy against the reference tasks.
         var recalled = 0
@@ -68,7 +48,7 @@ public enum EvalScorer {
 
             if let expectedDue = expected.dueHintContains {
                 dueHintChecks += 1
-                if let dueHint = match.dueHint, dueHint.lowercased().contains(expectedDue.lowercased()) {
+                if dueDateMatches(expected: expectedDue, suggestion: match, calendar: calendar, now: now) {
                     dueHintHits += 1
                 } else {
                     notes.append("due hint mismatch for \(match.title): \(match.dueHint ?? "nil")")
@@ -123,5 +103,65 @@ public enum EvalScorer {
             source: summary.source,
             notes: notes
         )
+    }
+
+    /// Structure: the contract the app promises downstream consumers.
+    private static func structureScore(
+        of summary: StructuredSummary,
+        against evalCase: EvalCase,
+        notes: inout [String]
+    ) -> Double {
+        var structureChecks = 0.0
+        var structurePassed = 0.0
+        func check(_ name: String, _ passed: Bool) {
+            structureChecks += 1
+            if passed {
+                structurePassed += 1
+            } else {
+                notes.append("structure: \(name) failed")
+            }
+        }
+        check("overview non-empty", !summary.overview.isEmpty)
+        check("overview <= 200 chars", summary.overview.count <= 200)
+        check("1-5 key points", (1 ... 5).contains(summary.keyPoints.count))
+        check("suggestion cap", summary.suggestions.count <= evalCase.maxSuggestions)
+        check("unique suggestion ids", Set(summary.suggestions.map(\.id)).count == summary.suggestions.count)
+        check("drafts match suggestions", summary.actionDrafts.count == summary.suggestions.count)
+        check(
+            "confidence in range",
+            summary.suggestions.allSatisfy { (0.0 ... 1.0).contains($0.confidence) }
+        )
+        return structureChecks > 0 ? structurePassed / structureChecks : 1
+    }
+
+    /// Due dates compare as resolved local calendar dates, not substrings:
+    /// an expectation of "friday" matches a suggestion whose `dueDate` is
+    /// next Friday's date or whose hint is the ISO string "2026-07-10" —
+    /// both resolve to the same calendar day. Substring matching is only
+    /// the fallback for expectations that don't parse to a date at all
+    /// ("someday", "eventually"), where a textual echo is all there is to
+    /// check.
+    static func dueDateMatches(
+        expected: String,
+        suggestion: TaskSuggestion,
+        calendar: Calendar,
+        now: Date
+    ) -> Bool {
+        let parser = DueDateParser(calendar: calendar)
+        guard let expectedDate = parser.date(from: expected, relativeTo: now) else {
+            return suggestion.dueHint?.lowercased().contains(expected.lowercased()) ?? false
+        }
+
+        // The suggestion's resolved date wins; a hint that itself parses
+        // (natural language or ISO) is the fallback.
+        let actualDate = suggestion.dueDate
+            ?? suggestion.dueHint.flatMap { parser.date(from: $0, relativeTo: now) }
+        guard let actualDate else {
+            // The expectation names a real day and the suggestion resolved
+            // none — a textual echo of the phrase still counts, matching
+            // the deterministic engine's hint-preserving behavior.
+            return suggestion.dueHint?.lowercased().contains(expected.lowercased()) ?? false
+        }
+        return calendar.isDate(actualDate, inSameDayAs: expectedDate)
     }
 }

@@ -126,7 +126,15 @@ public struct CalendarAvailabilityTool: FoundationModels.Tool {
             return "Calendar availability could not be determined for \(arguments.dayHint)."
         }
 
-        let busy = try await provider.busyIntervals(from: windowStart, to: windowEnd)
+        // Bounded: a hung EventKit read must fail the tool call (which the
+        // service maps to a typed tool failure) instead of stalling the
+        // whole generation.
+        let busyProvider = provider
+        let busy = try await LocalAssistDeadline.run(
+            .seconds(8),
+            stage: "calendar-availability-tool",
+            operation: { try await busyProvider.busyIntervals(from: windowStart, to: windowEnd) }
+        )
         let free = FreeSlotCalculator.freeWindows(
             busy: busy,
             within: DateInterval(start: windowStart, end: windowEnd),

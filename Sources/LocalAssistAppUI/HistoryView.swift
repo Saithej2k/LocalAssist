@@ -3,6 +3,8 @@ import SwiftUI
 
 struct RunHistoryView: View {
     var runs: [AssistantRun]
+    /// Long-press delete on a brief card; nil hides the affordance.
+    var onDelete: ((String) -> Void)?
     @State private var query = ""
 
     private var filteredRuns: [AssistantRun] {
@@ -73,6 +75,15 @@ struct RunHistoryView: View {
                 .overlay {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .stroke(LocalAssistColors.border)
+                }
+                .contextMenu {
+                    if let onDelete {
+                        Button(role: .destructive) {
+                            onDelete(run.id)
+                        } label: {
+                            Label("Delete brief", systemImage: "trash")
+                        }
+                    }
                 }
             }
         }

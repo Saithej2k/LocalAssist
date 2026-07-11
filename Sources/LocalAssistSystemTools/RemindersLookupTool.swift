@@ -77,7 +77,14 @@ public struct RemindersLookupTool: FoundationModels.Tool {
     public func call(arguments: Arguments) async throws -> String {
         await counter?.increment()
 
-        let all = try await provider.openReminders()
+        // Bounded like the calendar tool: a hung EventKit read fails the
+        // tool call rather than stalling generation.
+        let lookupProvider = provider
+        let all = try await LocalAssistDeadline.run(
+            .seconds(8),
+            stage: "reminders-lookup-tool",
+            operation: { try await lookupProvider.openReminders() }
+        )
         let term = arguments.searchTerm.trimmingCharacters(in: .whitespacesAndNewlines)
 
         let matches = term.isEmpty

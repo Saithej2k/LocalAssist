@@ -18,6 +18,9 @@ public enum GenerationFailure: Error, Equatable, Sendable {
     case rateLimited(detail: String)
     case concurrentRequests(detail: String)
     case toolExecutionFailed(tool: String, detail: String)
+    /// A generation stage overran its bounded deadline. `stage` is a
+    /// code-defined constant (never user content) naming what timed out.
+    case timedOut(stage: String)
     case unknown(detail: String)
 
     /// The app never dead-ends on generation failures; it switches to the
@@ -46,8 +49,28 @@ public enum GenerationFailure: Error, Equatable, Sendable {
             "Another generation is still running. Wait for it to finish or cancel it first."
         case .toolExecutionFailed(let tool, _):
             "The \(tool) tool failed while grounding the summary. The result may be less specific."
+        case .timedOut:
+            "Generation took too long, so the offline engine answered instead."
         case .unknown:
             "Generation failed unexpectedly. Please try again."
+        }
+    }
+
+    /// Stable machine-readable category for metrics and diagnostics.
+    /// Content-free by construction — only the case name, never the detail.
+    public var category: String {
+        switch self {
+        case .modelUnavailable: "modelUnavailable"
+        case .guardrailViolation: "guardrailViolation"
+        case .refused: "refused"
+        case .contextWindowExceeded: "contextWindowExceeded"
+        case .unsupportedLanguage: "unsupportedLanguage"
+        case .decodingFailure: "decodingFailure"
+        case .rateLimited: "rateLimited"
+        case .concurrentRequests: "concurrentRequests"
+        case .toolExecutionFailed: "toolExecutionFailed"
+        case .timedOut: "timedOut"
+        case .unknown: "unknown"
         }
     }
 }
@@ -73,6 +96,8 @@ extension GenerationFailure: CustomStringConvertible {
             "concurrentRequests: \(detail)"
         case .toolExecutionFailed(let tool, let detail):
             "toolExecutionFailed(\(tool)): \(detail)"
+        case .timedOut(let stage):
+            "timedOut: \(stage)"
         case .unknown(let detail):
             "unknown: \(detail)"
         }

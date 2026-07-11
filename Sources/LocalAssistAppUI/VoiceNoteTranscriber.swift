@@ -1,28 +1,15 @@
 import Combine
 import Foundation
+import LocalAssistCore
 import OSLog
 
 #if os(iOS) && canImport(AVFoundation) && canImport(Speech)
     import AVFoundation
     import Speech
 #endif
-
-public enum VoiceCaptureState: Equatable {
-    case idle
-    case requestingPermission
-    case recording
-    case unavailable(String)
-
-    public var isRecording: Bool {
-        self == .recording
-    }
-
-    /// Recording or spinning up — the mic button shows "stop" for both so
-    /// the tap feels instant.
-    public var isActive: Bool {
-        self == .recording || self == .requestingPermission
-    }
-}
+#if canImport(UIKit)
+    import UIKit
+#endif
 
 #if os(iOS) && canImport(AVFoundation) && canImport(Speech)
     /// On-device dictation built on iOS 26's SpeechAnalyzer/SpeechTranscriber.
@@ -105,6 +92,17 @@ public enum VoiceCaptureState: Equatable {
         /// Microphone energy for the live session, written by the tap
         /// thread and read at drain time.
         private var audioMeter: LockedAudioMeter?
+        /// Monotonic per-session stage marks (tap request → drain
+        /// completion). Written from the main actor and the tap thread;
+        /// the lock is inside.
+        private let timeline = LockedVoiceTimeline()
+        /// The finished session's timing snapshot, for the diagnostics
+        /// export. Milliseconds only, never content.
+        @Published public private(set) var lastSessionTimeline: VoiceSessionTimeline.Snapshot?
+        /// System pressure observers (audio interruption, media services
+        /// reset, backgrounding, memory warnings), installed once.
+        private var systemObservers: [NSObjectProtocol] = []
+        private var didInstallSystemObservers = false
 
         private nonisolated static let signposter = OSSignposter(
             subsystem: "com.saithej.localassist", category: "Voice"
@@ -142,6 +140,7 @@ public enum VoiceCaptureState: Equatable {
                 return
             }
 
+            installSystemObserversIfNeeded()
             state = .requestingPermission
             transcript = ""
             accumulator.reset()
@@ -152,6 +151,9 @@ public enum VoiceCaptureState: Equatable {
             sawFirstResult = false
             finalConfidences = []
             audioMeter = nil
+            timeline.reset()
+            timeline.recordTapRequested()
+            lastSessionTimeline = nil
             sessionGeneration += 1
             let generation = sessionGeneration
             let clock = ContinuousClock()
@@ -266,6 +268,10 @@ public enum VoiceCaptureState: Equatable {
                 }
                 self.resultsTask?.cancel()
                 self.resultsTask = nil
+                self.timeline.recordDrainCompleted()
+                let sessionTimeline = self.timeline.snapshot
+                self.lastSessionTimeline = sessionTimeline
+                logVoiceTimeline(sessionTimeline, generation: generation)
                 self.assessQuality(generation: generation)
             }
         }
@@ -437,11 +443,14 @@ public enum VoiceCaptureState: Equatable {
             let engineTask = Self.audioEngineTask(
                 continuation: continuation,
                 analyzerFormat: assets.format,
-                meter: meter
+                meter: meter,
+                timeline: timeline
             )
             audioEngine = try await engineTask.value.value
+            timeline.recordAudioReady()
             let analyzerAt = clock.now
             try await sessionAnalyzer.start(inputSequence: inputSequence)
+            timeline.recordAnalyzerStarted()
             let now = clock.now
             Self.log.info("""
             audio=\(Self.milliseconds(analyzerAt - engineAt))ms, \
@@ -481,7 +490,8 @@ public enum VoiceCaptureState: Equatable {
         private nonisolated static func audioEngineTask(
             continuation: AsyncStream<AnalyzerInput>.Continuation,
             analyzerFormat: AVAudioFormat,
-            meter: LockedAudioMeter
+            meter: LockedAudioMeter,
+            timeline: LockedVoiceTimeline
         ) -> Task<UncheckedSendable<AVAudioEngine>, Error> {
             let formatBox = UncheckedSendable(value: analyzerFormat)
             // Everything blocking — session activation, engine startup,
@@ -532,6 +542,7 @@ public enum VoiceCaptureState: Equatable {
                         }
                         guard let converter = converterBox.value else {
                             continuation.yield(AnalyzerInput(buffer: buffer))
+                            timeline.recordFrame()
                             return
                         }
                         let ratio = formatBox.value.sampleRate / buffer.format.sampleRate
@@ -558,6 +569,7 @@ public enum VoiceCaptureState: Equatable {
                             return
                         }
                         continuation.yield(AnalyzerInput(buffer: converted))
+                        timeline.recordFrame()
                         // Peak of the raw input: ~0 means the mic route is
                         // delivering silence (a routing/mute problem, not a
                         // recognition problem). Feeds the session quality
@@ -644,6 +656,7 @@ public enum VoiceCaptureState: Equatable {
             }
             if isFinal {
                 accumulator.finalizeSegment(text)
+                timeline.recordFinalResult()
                 if let confidence {
                     finalConfidences.append(confidence)
                 }
@@ -653,6 +666,7 @@ public enum VoiceCaptureState: Equatable {
                 """)
             } else {
                 accumulator.updatePartial(text)
+                timeline.recordFirstPartial()
             }
             transcript = accumulator.transcript
         }
@@ -786,92 +800,101 @@ public enum VoiceCaptureState: Equatable {
         }
     }
 
-    /// Carries a non-Sendable value across a boundary the caller has
-    /// verified safe (engine/converter handed between setup contexts).
-    private struct UncheckedSendable<T>: @unchecked Sendable {
-        let value: T
-    }
+    // MARK: - System pressure
 
-    /// One-shot flag for the converter input block (see the tap closure).
-    private final class MutableFlag: @unchecked Sendable {
-        var value = false
-    }
+    private extension VoiceNoteTranscriber {
 
-    /// Diagnostic counters mutated only from the serial tap callback.
-    private final class TapFlowCounter: @unchecked Sendable {
-        var buffers = 0
-        var frames = 0
-    }
-
-    /// AudioLevelMeter shared between the tap thread (writes) and the main
-    /// actor (reads at drain time), guarded by a lock.
-    private final class LockedAudioMeter: @unchecked Sendable {
-        private let lock = NSLock()
-        private var meter = AudioLevelMeter()
-
-        func record(peak: Float) {
-            lock.lock()
-            meter.record(peak: peak)
-            lock.unlock()
-        }
-
-        var snapshot: AudioLevelMeter {
-            lock.lock()
-            defer { lock.unlock() }
-            return meter
-        }
-    }
-
-    private enum VoiceCaptureError: Error, CustomStringConvertible {
-        case microphoneDenied
-        case microphoneBusy
-        case speechDenied
-        case speechRestricted
-        case recognizerUnavailable
-
-        var description: String {
-            switch self {
-            case .microphoneDenied:
-                "Microphone access is off for LocalAssist."
-            case .microphoneBusy:
-                "The microphone is in use — end any call or screen recording, then try again."
-            case .speechDenied:
-                "Speech recognition access is off for LocalAssist."
-            case .speechRestricted:
-                "Speech recognition is restricted on this device."
-            case .recognizerUnavailable:
-                "Speech recognition is unavailable for the current language."
+        /// AVAudioSession interruptions (calls, Siri, alarms), media-services
+        /// resets, backgrounding, and memory warnings all end or degrade a
+        /// live capture the same safe way: stop-and-drain, so every word the
+        /// recognizer already has still lands in the box. Installed lazily on
+        /// the first start so a never-used transcriber costs nothing.
+        private func installSystemObserversIfNeeded() {
+            guard !didInstallSystemObservers else {
+                return
             }
+            didInstallSystemObservers = true
+            let center = NotificationCenter.default
+
+            systemObservers.append(center.addObserver(
+                forName: AVAudioSession.interruptionNotification,
+                object: AVAudioSession.sharedInstance(),
+                queue: .main
+            ) { [weak self] notification in
+                let rawType = (notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) ?? 0
+                MainActor.assumeIsolated {
+                    guard let self, self.state.isActive else {
+                        return
+                    }
+                    // `.began` means the mic is gone (call, Siri, alarm).
+                    // `.ended` for a session we already stopped needs no
+                    // action — a fresh start builds a new session anyway.
+                    if AVAudioSession.InterruptionType(rawValue: rawType) == .began {
+                        Self.log.info("audio session interrupted — draining capture")
+                        self.stop()
+                    }
+                }
+            })
+
+            systemObservers.append(center.addObserver(
+                forName: AVAudioSession.mediaServicesWereResetNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.state.isActive else {
+                        return
+                    }
+                    // The audio daemon restarted under us: every audio object
+                    // is invalid. Keep the words already recognized, tear the
+                    // rest down.
+                    Self.log.error("media services reset — ending capture")
+                    self.accumulator.endSegmentWithoutFinal()
+                    if !self.accumulator.transcript.isEmpty {
+                        self.transcript = self.accumulator.transcript
+                    }
+                    self.teardown()
+                    self.state = .idle
+                }
+            })
+
+            #if canImport(UIKit)
+                systemObservers.append(center.addObserver(
+                    forName: UIApplication.didEnterBackgroundNotification,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        guard let self, self.state.isActive else {
+                            return
+                        }
+                        // No background recording by design — drain what was
+                        // said and release the mic.
+                        Self.log.info("app backgrounded — draining capture")
+                        self.stop()
+                    }
+                })
+
+                systemObservers.append(center.addObserver(
+                    forName: UIApplication.didReceiveMemoryWarningNotification,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        guard let self else {
+                            return
+                        }
+                        // Prepared assets are re-derivable data; a live
+                        // capture keeps them (they are in use), an idle
+                        // transcriber sheds them.
+                        if !self.state.isActive {
+                            Self.log.info("memory warning — releasing prewarmed assets")
+                            self.preparedAssets = nil
+                        }
+                    }
+                })
+            #endif
         }
-    }
-#else
-    @MainActor
-    public final class VoiceNoteTranscriber: ObservableObject {
-        @Published public private(set) var state: VoiceCaptureState = .unavailable("Voice capture requires iPhone.")
-        @Published public private(set) var transcript = ""
-        @Published public private(set) var errorMessage: String? = "Voice capture requires iPhone."
-        @Published public private(set) var qualityHint: String?
 
-        public init() {}
-
-        public var isRecording: Bool {
-            false
-        }
-
-        public func prewarm(localeIdentifier _: String = Locale.current.identifier) {}
-
-        public func start(localeIdentifier _: String = Locale.current.identifier) async {
-            errorMessage = "Voice capture requires iPhone."
-            state = .unavailable("Voice capture requires iPhone.")
-        }
-
-        public func stop() {
-            state = .idle
-        }
-
-        public func resetDictation() {
-            transcript = ""
-            qualityHint = nil
-        }
     }
 #endif

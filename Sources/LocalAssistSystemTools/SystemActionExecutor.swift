@@ -146,7 +146,12 @@ public struct SystemActionExecutor: ToolActionExecuting {
     /// Live Reminders/Calendar writes. Access is requested lazily on first
     /// write and every write happens only after explicit user confirmation
     /// upstream (`PreparedToolAction.requiresConfirmation`).
-    public final class EventKitWriteStore: SystemWriteStore, @unchecked Sendable {
+    ///
+    /// An actor, not an `@unchecked Sendable` class: `EKEventStore`,
+    /// `EKReminder`, and `EKEvent` are not Sendable and never leave this
+    /// isolation domain — callers get back only the created item's system
+    /// identifier, a plain value the receipt DTOs downstream can carry.
+    public actor EventKitWriteStore: SystemWriteStore {
         private let store = EKEventStore()
 
         public init() {}
@@ -155,6 +160,7 @@ public struct SystemActionExecutor: ToolActionExecuting {
             guard try await store.requestFullAccessToReminders() else {
                 throw SystemAccessError.remindersAccessDenied
             }
+            try Task.checkCancellation()
 
             let reminder = EKReminder(eventStore: store)
             reminder.title = title
@@ -176,6 +182,7 @@ public struct SystemActionExecutor: ToolActionExecuting {
             guard try await store.requestFullAccessToEvents() else {
                 throw SystemAccessError.calendarAccessDenied
             }
+            try Task.checkCancellation()
 
             let event = EKEvent(eventStore: store)
             event.title = title

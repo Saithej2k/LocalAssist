@@ -22,18 +22,33 @@ public struct LocalAssistService: Sendable {
     /// Inputs longer than one chunk trigger map-reduce summarization.
     private let chunkTargetCharacters: Int
 
+    /// Bounded deadline for one model streaming pass. A wedged stream —
+    /// device suspending mid-generation, model service hung — otherwise
+    /// spins forever; on expiry the run falls back deterministically with
+    /// `GenerationFailure.timedOut` recorded. Generous on purpose: it must
+    /// only fire when something is genuinely stuck, never on a slow-but-
+    /// working device.
+    private let modelResponseDeadline: Duration
+
+    /// Bounded deadline for routing one direct command.
+    private let routingDeadline: Duration
+
     public init(
         model: (any StructuredModelClient)? = nil,
         fallback: DeterministicFallbackGenerator = DeterministicFallbackGenerator(),
         normalizer: SummaryNormalizer = SummaryNormalizer(),
         validator: RequestValidator = RequestValidator(),
-        chunkTargetCharacters: Int = 2800
+        chunkTargetCharacters: Int = 2800,
+        modelResponseDeadline: Duration = .seconds(90),
+        routingDeadline: Duration = .seconds(30)
     ) {
         self.model = model
         self.fallback = fallback
         self.normalizer = normalizer
         self.validator = validator
         self.chunkTargetCharacters = chunkTargetCharacters
+        self.modelResponseDeadline = modelResponseDeadline
+        self.routingDeadline = routingDeadline
     }
 
     /// Warms up the underlying model so the first request streams sooner.
@@ -85,7 +100,7 @@ public struct LocalAssistService: Sendable {
 
     private func summarize(
         _ request: AssistantRequest,
-        emit: @Sendable (SummaryGenerationUpdate) -> Void
+        emit: @escaping @Sendable (SummaryGenerationUpdate) -> Void
     ) async throws -> StructuredSummary {
         let signposter = LocalAssistInstrumentation.generationSignposter()
         let summarizeState = signposter.beginInterval("Summarize")
@@ -147,7 +162,7 @@ public struct LocalAssistService: Sendable {
     private func mapReduceSummary(
         _ request: AssistantRequest,
         chunks: [String],
-        emit: @Sendable (SummaryGenerationUpdate) -> Void,
+        emit: @escaping @Sendable (SummaryGenerationUpdate) -> Void,
         signposter: OSSignposter
     ) async throws -> StructuredSummary {
         let mapState = signposter.beginInterval("Map-reduce")
@@ -221,17 +236,16 @@ public struct LocalAssistService: Sendable {
 
     private func singlePass(
         _ request: AssistantRequest,
-        emit: @Sendable (SummaryGenerationUpdate) -> Void,
+        emit: @escaping @Sendable (SummaryGenerationUpdate) -> Void,
         publishUpdates: Bool,
         signposter: OSSignposter
     ) async throws -> StructuredSummary {
+        let sink = UpdateSink(emit: emit, publishUpdates: publishUpdates, signposter: signposter)
         guard let model else {
             return try await fallbackSummary(
                 for: request,
                 unavailability: ModelUnavailability(reason: .adapterNotConfigured),
-                emit: emit,
-                publishUpdates: publishUpdates,
-                signposter: signposter
+                sink: sink
             )
         }
 
@@ -246,21 +260,61 @@ public struct LocalAssistService: Sendable {
         guard availability.isAvailable else {
             let unavailability = availability.unavailability
                 ?? ModelUnavailability(reason: .other)
-            return try await fallbackSummary(
-                for: request,
-                unavailability: unavailability,
-                emit: emit,
-                publishUpdates: publishUpdates,
-                signposter: signposter
-            )
+            return try await fallbackSummary(for: request, unavailability: unavailability, sink: sink)
         }
 
         do {
-            let responseState = signposter.beginInterval("Model response")
-            if publishUpdates {
-                emit(.init(phase: .streamingModel, message: "Streaming on-device model response"))
+            return try await modelSummary(
+                for: request,
+                model: model,
+                availability: availability,
+                sink: sink
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let failure as GenerationFailure {
+            if case .modelUnavailable(let unavailability) = failure {
+                return try await fallbackSummary(for: request, unavailability: unavailability, sink: sink)
             }
+            return try await fallbackSummary(
+                for: request,
+                availability: availability,
+                context: FallbackContext(
+                    reason: String(describing: failure),
+                    guidance: failure.userMessage,
+                    failureCategory: failure.category
+                ),
+                sink: sink
+            )
+        } catch {
+            throw GenerationFailure.unknown(detail: String(describing: error))
+        }
+    }
 
+    /// One deadline-bounded model streaming pass plus normalization. Throws
+    /// typed `GenerationFailure`s; `singlePass` owns the fallback policy.
+    private func modelSummary(
+        for request: AssistantRequest,
+        model: any StructuredModelClient,
+        availability: ModelAvailability,
+        sink: UpdateSink
+    ) async throws -> StructuredSummary {
+        let emit = sink.emit
+        let publishUpdates = sink.publishUpdates
+        let signposter = sink.signposter
+        let responseState = signposter.beginInterval("Model response")
+        if publishUpdates {
+            emit(.init(phase: .streamingModel, message: "Streaming on-device model response"))
+        }
+
+        // The whole streaming pass runs under a deadline: a wedged
+        // stream (app suspended mid-generation, hung model service)
+        // otherwise never finishes and never errors. On expiry the
+        // stream task is cancelled and the run falls back with a typed
+        // `timedOut` failure like any other generation failure.
+        let latest = try await Self.boundedModelPass(
+            deadline: modelResponseDeadline
+        ) { () -> StructuredSummaryPartial? in
             var latest: StructuredSummaryPartial?
             for try await partial in model.streamSummary(for: request) {
                 try Task.checkCancellation()
@@ -275,112 +329,107 @@ public struct LocalAssistService: Sendable {
                     ))
                 }
             }
-            signposter.endInterval("Model response", responseState)
-            try Task.checkCancellation()
-
-            guard let latest, latest.isComplete else {
-                throw GenerationFailure.decodingFailure(
-                    detail: "The model stream ended before producing a complete summary."
-                )
-            }
-
-            if publishUpdates {
-                emit(.init(phase: .normalizing, partial: latest, message: "Normalizing structured output"))
-            }
-            let normalizeState = signposter.beginInterval("Normalize summary")
-            let summary = normalizer.summary(
-                from: latest,
-                request: request,
-                availability: availability
-            )
-            signposter.endInterval("Normalize summary", normalizeState)
-
-            guard let summary else {
-                throw GenerationFailure.decodingFailure(
-                    detail: "The model produced an empty overview or no key points."
-                )
-            }
-
-            if publishUpdates {
-                emit(.init(
-                    phase: .completed,
-                    partial: latest,
-                    summary: summary,
-                    message: "Completed with Foundation Models"
-                ))
-            }
-            return summary
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch let failure as GenerationFailure {
-            if case .modelUnavailable(let unavailability) = failure {
-                return try await fallbackSummary(
-                    for: request,
-                    unavailability: unavailability,
-                    emit: emit,
-                    publishUpdates: publishUpdates,
-                    signposter: signposter
-                )
-            }
-            return try await fallbackSummary(
-                for: request,
-                availability: availability,
-                fallbackReason: String(describing: failure),
-                guidance: failure.userMessage,
-                emit: emit,
-                publishUpdates: publishUpdates,
-                signposter: signposter
-            )
-        } catch {
-            throw GenerationFailure.unknown(detail: String(describing: error))
+            return latest
         }
+        signposter.endInterval("Model response", responseState)
+        try Task.checkCancellation()
+
+        guard let latest, latest.isComplete else {
+            throw GenerationFailure.decodingFailure(
+                detail: "The model stream ended before producing a complete summary."
+            )
+        }
+
+        if publishUpdates {
+            emit(.init(phase: .normalizing, partial: latest, message: "Normalizing structured output"))
+        }
+        let normalizeState = signposter.beginInterval("Normalize summary")
+        let summary = normalizer.summary(
+            from: latest,
+            request: request,
+            availability: availability
+        )
+        signposter.endInterval("Normalize summary", normalizeState)
+
+        guard let summary else {
+            throw GenerationFailure.decodingFailure(
+                detail: "The model produced an empty overview or no key points."
+            )
+        }
+
+        if publishUpdates {
+            emit(.init(
+                phase: .completed,
+                partial: latest,
+                summary: summary,
+                message: "Completed with Foundation Models"
+            ))
+        }
+        return summary
     }
 
-    // MARK: - Fallback
+}
 
-    private func fallbackSummary(
+// MARK: - Fallback
+
+/// How generation updates leave the service: the emit closure, whether this
+/// pass publishes to the UI, and the signposter — they travel together
+/// through every stage.
+private struct UpdateSink: Sendable {
+    let emit: @Sendable (SummaryGenerationUpdate) -> Void
+    let publishUpdates: Bool
+    let signposter: OSSignposter
+}
+
+/// Why a run is falling back: prose reason for diagnostics, user-facing
+/// guidance, and the stable machine-readable category.
+private struct FallbackContext: Sendable {
+    let reason: String
+    let guidance: String
+    let failureCategory: String?
+}
+
+private extension LocalAssistService {
+    func fallbackSummary(
         for request: AssistantRequest,
         unavailability: ModelUnavailability,
-        emit: @Sendable (SummaryGenerationUpdate) -> Void,
-        publishUpdates: Bool,
-        signposter: OSSignposter
+        sink: UpdateSink
     ) async throws -> StructuredSummary {
         try await fallbackSummary(
             for: request,
             availability: .unavailable(unavailability),
-            fallbackReason: unavailability.detail,
-            guidance: unavailability.userGuidance,
-            emit: emit,
-            publishUpdates: publishUpdates,
-            signposter: signposter
+            context: FallbackContext(
+                reason: unavailability.detail,
+                guidance: unavailability.userGuidance,
+                failureCategory: GenerationFailure.modelUnavailable(unavailability).category
+            ),
+            sink: sink
         )
     }
 
-    private func fallbackSummary(
+    func fallbackSummary(
         for request: AssistantRequest,
         availability: ModelAvailability,
-        fallbackReason: String,
-        guidance: String,
-        emit: @Sendable (SummaryGenerationUpdate) -> Void,
-        publishUpdates: Bool,
-        signposter: OSSignposter
+        context: FallbackContext,
+        sink: UpdateSink
     ) async throws -> StructuredSummary {
-        if publishUpdates {
-            emit(.init(phase: .fallback, message: guidance))
+        if sink.publishUpdates {
+            sink.emit(.init(phase: .fallback, message: context.guidance))
         }
-        let fallbackState = signposter.beginInterval("Fallback generation")
+        let fallbackState = sink.signposter.beginInterval("Fallback generation")
         defer {
-            signposter.endInterval("Fallback generation", fallbackState)
+            sink.signposter.endInterval("Fallback generation", fallbackState)
         }
 
-        let summary = try await fallback.generate(
+        var summary = try await fallback.generate(
             for: request,
             availability: availability,
-            fallbackReason: fallbackReason
+            fallbackReason: context.reason
         )
-        if publishUpdates {
-            emitFallbackPartials(for: summary, message: guidance, emit: emit)
-            emit(.init(
+        summary.diagnostics.failureCategory = context.failureCategory
+        if sink.publishUpdates {
+            emitFallbackPartials(for: summary, message: context.guidance, emit: sink.emit)
+            sink.emit(.init(
                 phase: .completed,
                 summary: summary,
                 message: "Completed with deterministic fallback"
@@ -389,10 +438,25 @@ public struct LocalAssistService: Sendable {
         return summary
     }
 
-    private func emitFallbackPartials(
+    /// One model streaming pass under a deadline, with `DeadlineExceeded`
+    /// mapped into the typed failure taxonomy so every caller's existing
+    /// `GenerationFailure` policy (fall back, record reason) applies.
+    static func boundedModelPass<T: Sendable>(
+        deadline: Duration,
+        stage: String = "model-response",
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        do {
+            return try await LocalAssistDeadline.run(deadline, stage: stage, operation: operation)
+        } catch let exceeded as DeadlineExceeded {
+            throw GenerationFailure.timedOut(stage: exceeded.stage)
+        }
+    }
+
+    func emitFallbackPartials(
         for summary: StructuredSummary,
         message: String,
-        emit: @Sendable (SummaryGenerationUpdate) -> Void
+        emit: @escaping @Sendable (SummaryGenerationUpdate) -> Void
     ) {
         var partial = StructuredSummaryPartial(overview: summary.headline)
         emit(.init(phase: .fallback, partial: partial, message: message))
@@ -421,7 +485,7 @@ public struct LocalAssistService: Sendable {
 private extension LocalAssistService {
     func routeDirectCommand(
         _ request: AssistantRequest,
-        emit: @Sendable (SummaryGenerationUpdate) -> Void,
+        emit: @escaping @Sendable (SummaryGenerationUpdate) -> Void,
         signposter: OSSignposter
     ) async throws -> StructuredSummary {
         let routeState = signposter.beginInterval("Route command")
@@ -443,20 +507,29 @@ private extension LocalAssistService {
         if let model, availability.isAvailable {
             emit(.init(phase: .streamingModel, message: "Routing command with the on-device model"))
             do {
-                if let routed = try await model.routeCommand(for: request) {
+                let routingModel = model
+                if let routed = try await Self.boundedModelPass(
+                    deadline: routingDeadline,
+                    stage: "route-command",
+                    operation: { try await routingModel.routeCommand(for: request) }
+                ) {
                     try Task.checkCancellation()
                     // Drop example-leaked actions and let the deterministic
                     // parser win on dates and clock times before anything
                     // reaches the review cards.
-                    let grounded = RoutedActionReconciler.reconciled(
+                    let outcome = RoutedActionReconciler.reconcile(
                         routed,
                         sourceText: request.sourceText
                     )
+                    let grounded = outcome.actions
                     if !grounded.isEmpty {
                         let summary = RoutedActionMapper.summary(
                             from: Array(grounded.prefix(request.maxSuggestions)),
                             source: .foundationModels,
-                            diagnostics: GenerationDiagnostics(availability: availability)
+                            diagnostics: GenerationDiagnostics(
+                                availability: availability,
+                                reconcilerFindings: outcome.findings
+                            )
                         )
                         emit(.init(
                             phase: .completed,
@@ -508,7 +581,7 @@ private extension LocalAssistService {
     func routeCommandBatch(
         _ dump: DirectCommandDetector.PartitionedDump,
         request: AssistantRequest,
-        emit: @Sendable (SummaryGenerationUpdate) -> Void,
+        emit: @escaping @Sendable (SummaryGenerationUpdate) -> Void,
         signposter: OSSignposter
     ) async throws -> StructuredSummary {
         let lines = dump.commandLines
@@ -558,7 +631,8 @@ private extension LocalAssistService {
             source: (anyModelRouted || capture.usedModel) ? .foundationModels : .deterministicFallback,
             diagnostics: GenerationDiagnostics(
                 availability: availability,
-                fallbackReason: fallbackReasons.isEmpty ? nil : fallbackReasons.joined(separator: " | ")
+                fallbackReason: fallbackReasons.isEmpty ? nil : fallbackReasons.joined(separator: " | "),
+                reconcilerFindings: routed.findings.isEmpty ? nil : routed.findings
             )
         )
         summary.suggestions.append(contentsOf: capture.suggestions)
@@ -580,6 +654,7 @@ private extension LocalAssistService {
         var actions: [RoutedAction] = []
         var usedModel = false
         var failureNotes: [String] = []
+        var findings: [RoutedActionReconciler.Finding] = []
     }
 
     /// Each command line routes like a single command — model when
@@ -589,7 +664,7 @@ private extension LocalAssistService {
         _ lines: [String],
         request: AssistantRequest,
         availability: ModelAvailability,
-        emit: @Sendable (SummaryGenerationUpdate) -> Void
+        emit: @escaping @Sendable (SummaryGenerationUpdate) -> Void
     ) async throws -> RoutedLines {
         var routed = RoutedLines()
         for (index, line) in lines.enumerated() {
@@ -610,8 +685,15 @@ private extension LocalAssistService {
             var lineActions: [RoutedAction] = []
             if let model, availability.isAvailable {
                 do {
-                    if let modelActions = try await model.routeCommand(for: lineRequest) {
-                        lineActions = RoutedActionReconciler.reconciled(modelActions, sourceText: line)
+                    let routingModel = model
+                    if let modelActions = try await Self.boundedModelPass(
+                        deadline: routingDeadline,
+                        stage: "route-command",
+                        operation: { try await routingModel.routeCommand(for: lineRequest) }
+                    ) {
+                        let outcome = RoutedActionReconciler.reconcile(modelActions, sourceText: line)
+                        lineActions = outcome.actions
+                        routed.findings.append(contentsOf: outcome.findings)
                         routed.usedModel = routed.usedModel || !lineActions.isEmpty
                     }
                 } catch is CancellationError {
@@ -642,7 +724,7 @@ private extension LocalAssistService {
     func extractCaptureLines(
         from dump: DirectCommandDetector.PartitionedDump,
         request: AssistantRequest,
-        emit: @Sendable (SummaryGenerationUpdate) -> Void,
+        emit: @escaping @Sendable (SummaryGenerationUpdate) -> Void,
         signposter: OSSignposter
     ) async throws -> CaptureExtraction {
         guard !dump.captureText.isEmpty else {

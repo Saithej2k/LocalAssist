@@ -69,14 +69,19 @@ public struct AssistantRunEntity: AppEntity, Identifiable, Sendable {
 
     public enum LocalAssistSpotlight {
         /// Re-donates all saved briefs. Cheap (history is capped) and safe to
-        /// call on every launch and after every new capture.
+        /// call on every launch and after every new capture. Tombstoned runs
+        /// are excluded — re-donating a run whose deletion is still pending
+        /// would resurrect exactly the entry the outbox is trying to remove.
         public static func donateAll() async {
             guard let store = RunHistoryStore.sharedOrLocal(),
                   let runs = try? await store.load()
             else {
                 return
             }
-            let entities = runs.map(AssistantRunEntity.init(run:))
+            let tombstoned = Set(await store.pendingSpotlightDeletions().map(\.runID))
+            let entities = runs
+                .filter { !tombstoned.contains($0.id) }
+                .map(AssistantRunEntity.init(run:))
             try? await CSSearchableIndex.default().indexAppEntities(entities)
         }
     }
@@ -97,10 +102,19 @@ public struct AssistantRunQuery: EntityQuery, Sendable {
             .map(AssistantRunEntity.init(run:))
     }
 
+    /// Deleted-but-not-yet-unindexed runs must never surface as entities:
+    /// the tombstone outbox is the contract, so a run in it is already gone
+    /// from Shortcuts/Siri even if the crash happened between the tombstone
+    /// write and the history write.
     private func loadRuns() async throws -> [AssistantRun] {
         guard let store = RunHistoryStore.sharedOrLocal() else {
             return []
         }
-        return try await store.load()
+        let tombstoned = Set(await store.pendingSpotlightDeletions().map(\.runID))
+        let runs = try await store.load()
+        guard !tombstoned.isEmpty else {
+            return runs
+        }
+        return runs.filter { !tombstoned.contains($0.id) }
     }
 }

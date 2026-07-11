@@ -23,19 +23,26 @@ public struct EvalCase: Identifiable, Sendable {
     public var expectedTasks: [ExpectedTask]
     /// Phrases that must NOT appear anywhere in the output — hallucination probes.
     public var forbiddenPhrases: [String]
+    /// Proper names the input contains, playing the role of the user's
+    /// known contacts for speech evals: ASR misrecognizes exactly these
+    /// ("Mira" → "mirror"), and the proper-noun-corrected ablation measures
+    /// how much a contact-aware resolver claws back.
+    public var properNouns: [String]
 
     public init(
         id: String,
         input: String,
         maxSuggestions: Int = 5,
         expectedTasks: [ExpectedTask],
-        forbiddenPhrases: [String] = []
+        forbiddenPhrases: [String] = [],
+        properNouns: [String] = []
     ) {
         self.id = id
         self.input = input
         self.maxSuggestions = maxSuggestions
         self.expectedTasks = expectedTasks
         self.forbiddenPhrases = forbiddenPhrases
+        self.properNouns = properNouns
     }
 }
 
@@ -50,7 +57,8 @@ public enum EvalDataset {
                 .init(keywords: ["send", "mira"], dueHintContains: "friday", action: .messageDraft),
                 .init(keywords: ["schedule", "design", "sync"], dueHintContains: "next week", action: .calendarHold),
                 .init(keywords: ["review", "onboarding"]),
-            ]
+            ],
+            properNouns: ["Mira"]
         ),
         EvalCase(
             id: "urgent-deadline",
@@ -79,7 +87,8 @@ public enum EvalDataset {
                 .init(keywords: ["book", "war room"], dueHintContains: "thursday", action: .calendarHold),
                 .init(keywords: ["follow", "platform"]),
             ],
-            forbiddenPhrases: ["Mira"]
+            forbiddenPhrases: ["Mira"],
+            properNouns: ["Priya"]
         ),
         EvalCase(
             id: "single-task",
@@ -119,7 +128,8 @@ public enum EvalDataset {
             expectedTasks: [
                 .init(keywords: ["ship", "hotfix"], dueHintContains: "tonight"),
                 .init(keywords: ["confirm", "dana"]),
-            ]
+            ],
+            properNouns: ["Dana"]
         ),
     ]
 }

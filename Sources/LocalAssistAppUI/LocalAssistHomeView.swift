@@ -213,7 +213,9 @@ public struct LocalAssistHomeView: View {
                             tint: .secondary
                         )
                     } else {
-                        RunHistoryView(runs: viewModel.history)
+                        RunHistoryView(runs: viewModel.history) { runID in
+                            viewModel.deleteRun(id: runID)
+                        }
                     }
                 }
                 .padding(.horizontal, 20)
@@ -540,6 +542,13 @@ private struct InputComposerView: View {
         }
         .onChange(of: voiceTranscriber.transcript) { _, newValue in
             viewModel.mergeVoiceTranscript(newValue)
+        }
+        // Timing snapshot only (milliseconds, no content) — mirrored so the
+        // Settings diagnostics export can include the last capture.
+        .onChange(of: voiceTranscriber.lastSessionTimeline) { _, snapshot in
+            if let snapshot {
+                viewModel.latestVoiceTimeline = snapshot
+            }
         }
     }
 

@@ -303,21 +303,35 @@ public struct GenerationDiagnostics: Codable, Equatable, Sendable {
     public var fallbackReason: String?
     /// Number of tools the model invoked while producing the summary.
     public var toolInvocationCount: Int
+    /// What the reconciler did to each model-routed proposal — rule IDs and
+    /// dispositions only, never content. Nil for brief-pipeline runs and for
+    /// history saved before this field existed.
+    public var reconcilerFindings: [RoutedActionReconciler.Finding]?
+    /// Stable taxonomy case (`GenerationFailure.category`) when a typed
+    /// failure caused the fallback — machine-readable where
+    /// `fallbackReason` is prose.
+    public var failureCategory: String?
 
     public init(
         availability: ModelAvailability,
         fallbackReason: String? = nil,
-        toolInvocationCount: Int = 0
+        toolInvocationCount: Int = 0,
+        reconcilerFindings: [RoutedActionReconciler.Finding]? = nil,
+        failureCategory: String? = nil
     ) {
         self.availability = availability
         self.fallbackReason = fallbackReason
         self.toolInvocationCount = toolInvocationCount
+        self.reconcilerFindings = reconcilerFindings
+        self.failureCategory = failureCategory
     }
 
     private enum CodingKeys: String, CodingKey {
         case availability
         case fallbackReason
         case toolInvocationCount
+        case reconcilerFindings
+        case failureCategory
     }
 
     public init(from decoder: Decoder) throws {
@@ -325,6 +339,11 @@ public struct GenerationDiagnostics: Codable, Equatable, Sendable {
         availability = try container.decode(ModelAvailability.self, forKey: .availability)
         fallbackReason = try container.decodeIfPresent(String.self, forKey: .fallbackReason)
         toolInvocationCount = try container.decodeIfPresent(Int.self, forKey: .toolInvocationCount) ?? 0
+        reconcilerFindings = try container.decodeIfPresent(
+            [RoutedActionReconciler.Finding].self,
+            forKey: .reconcilerFindings
+        )
+        failureCategory = try container.decodeIfPresent(String.self, forKey: .failureCategory)
     }
 }
 

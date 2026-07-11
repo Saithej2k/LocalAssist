@@ -1,8 +1,12 @@
+import Combine
 import Foundation
 import LocalAssistCore
 import OSLog
 import LocalAssistFoundationModels
 import LocalAssistSystemTools
+#if canImport(UIKit)
+    import UIKit
+#endif
 
 @MainActor
 public final class LocalAssistViewModel: ObservableObject {
@@ -27,6 +31,8 @@ public final class LocalAssistViewModel: ObservableObject {
     private let worker: LocalAssistWorker
     private let morningBrief: MorningBriefScheduler
     private var generationTask: Task<Void, Never>?
+    /// Cancels itself when the view model deallocates — no deinit bookkeeping.
+    private var memoryWarningSubscription: AnyCancellable?
     private var forceOfflineFallbackForNextRun = false
     /// One prewarm per Smart-mode session — WWDC "Code-Along" pattern: fire
     /// when the user gives a strong hint (starts typing) so time-to-first-
@@ -67,6 +73,20 @@ public final class LocalAssistViewModel: ObservableObject {
         generationMessage = nil
         streamingPartial = nil
         errorMessage = nil
+
+        #if canImport(UIKit)
+            // Memory pressure sheds idle model sessions; the conversation
+            // digest and saved history are untouched. Captures the worker,
+            // not self — the closure needs nothing MainActor-isolated.
+            let pressureWorker = worker
+            memoryWarningSubscription = NotificationCenter.default
+                .publisher(for: UIApplication.didReceiveMemoryWarningNotification)
+                .sink { _ in
+                    Task {
+                        await pressureWorker.handleMemoryPressure()
+                    }
+                }
+        #endif
     }
 
     deinit {
@@ -325,6 +345,24 @@ public final class LocalAssistViewModel: ObservableObject {
             guard let self else { return }
             await worker.clearHistory()
             self.history = []
+            NotificationCenter.default.post(name: .localAssistHistoryDidDelete, object: nil)
+        }
+    }
+
+    /// Deletes one saved brief from history. The Spotlight entry follows
+    /// via the tombstone outbox — it never outlives the local data by more
+    /// than the cleanup pass.
+    public func deleteRun(id: String) {
+        Task { [weak self] in
+            guard let self else { return }
+            self.history = await worker.deleteRun(id: id)
+            if self.run?.id == id {
+                self.run = nil
+                self.preparedActions = []
+                self.executedActions = [:]
+            }
+            await morningBrief.refresh(history: self.history)
+            NotificationCenter.default.post(name: .localAssistHistoryDidDelete, object: nil)
         }
     }
 
@@ -334,11 +372,27 @@ public final class LocalAssistViewModel: ObservableObject {
         await worker.transcriptDiagnostics()
     }
 
+    /// Timing snapshot of the most recent voice capture, mirrored from the
+    /// transcriber by the capture UI so the diagnostics export can include
+    /// it. Milliseconds only — never transcript content.
+    public var latestVoiceTimeline: VoiceSessionTimeline.Snapshot?
+
+    public static let sampleInput = """
+    Call Mom tonight to check in, text Priya about Sunday brunch, and pick up the birthday cake \
+    Saturday morning. Book a dentist appointment for next week and pay the electricity bill by Friday.
+    """
+}
+
+// MARK: - Exports
+
+/// Share-sheet exports, kept out of the class body: pure functions of
+/// published state.
+public extension LocalAssistViewModel {
     /// Writes both history exports to temporary files for the share sheet:
     /// JSON is the app's exact history format, Markdown is human-readable.
     /// Files share far better than raw strings — AirDrop, Save to Files,
     /// and Mail all treat them as documents.
-    public func exportFileURLs() -> (markdown: URL?, json: URL?) {
+    func exportFileURLs() -> (markdown: URL?, json: URL?) {
         guard !history.isEmpty else {
             return (nil, nil)
         }
@@ -366,8 +420,43 @@ public final class LocalAssistViewModel: ObservableObject {
         return (markdownURL, jsonURL)
     }
 
+    /// Redacted diagnostics export: metrics, stage timings, environment,
+    /// context bookkeeping, rule IDs — structurally content-free (see
+    /// `DiagnosticsExporter`). User-initiated from Settings only; nothing
+    /// on a normal screen surfaces these numbers.
+    func exportDiagnosticsURL() async -> URL? {
+        guard !history.isEmpty else {
+            return nil
+        }
+        let voiceTimings = latestVoiceTimeline.map { snapshot in
+            var timings: [String: Double] = [:]
+            timings["audioReadyMilliseconds"] = snapshot.audioReadyMilliseconds
+            timings["firstFrameMilliseconds"] = snapshot.firstFrameMilliseconds
+            timings["analyzerStartMilliseconds"] = snapshot.analyzerStartMilliseconds
+            timings["firstPartialMilliseconds"] = snapshot.firstPartialMilliseconds
+            timings["lastFrameMilliseconds"] = snapshot.lastFrameMilliseconds
+            timings["finalResultMilliseconds"] = snapshot.finalResultMilliseconds
+            timings["drainCompletedMilliseconds"] = snapshot.drainCompletedMilliseconds
+            return timings.compactMapValues { $0 }
+        }
+        let export = DiagnosticsExporter.export(
+            runs: history,
+            lastVoiceSessionTimings: voiceTimings,
+            lastPersistenceMilliseconds: await worker.lastPersistenceMilliseconds
+        )
+        let stamp = LocalAssistDates.dateOnlyString(from: Date())
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalAssist-diagnostics-\(stamp).json")
+        guard let data = try? DiagnosticsExporter.jsonData(export),
+              (try? data.write(to: url, options: .atomic)) != nil
+        else {
+            return nil
+        }
+        return url
+    }
+
     /// Markdown export of the entire local history — the data is the user's.
-    public func exportMarkdown() -> String {
+    func exportMarkdown() -> String {
         var lines = ["# LocalAssist history", ""]
         let formatter = ISO8601DateFormatter()
         for run in history {
@@ -393,11 +482,6 @@ public final class LocalAssistViewModel: ObservableObject {
         }
         return lines.joined(separator: "\n")
     }
-
-    public static let sampleInput = """
-    Call Mom tonight to check in, text Priya about Sunday brunch, and pick up the birthday cake \
-    Saturday morning. Book a dentist appointment for next week and pay the electricity bill by Friday.
-    """
 }
 
 // MARK: - Generation run
@@ -419,10 +503,12 @@ private extension LocalAssistViewModel {
         generationTask = Task { [weak self] in
             guard let self else { return }
             let startedAt = Date()
+            var collector = StageTimingCollector()
 
             do {
                 var finalSummary = try await drain(
-                    await worker.streamSummary(request, forceFallback: useFallback)
+                    await worker.streamSummary(request, forceFallback: useFallback),
+                    collector: &collector
                 )
 
                 // The service always ends a run with a summary or a typed
@@ -432,7 +518,8 @@ private extension LocalAssistViewModel {
                 // every other failure: the deterministic engine answers.
                 if finalSummary == nil, !useFallback, !Task.isCancelled {
                     finalSummary = try await drain(
-                        await worker.streamSummary(request, forceFallback: true)
+                        await worker.streamSummary(request, forceFallback: true),
+                        collector: &collector
                     )
                 }
                 guard !Task.isCancelled else { return }
@@ -441,12 +528,18 @@ private extension LocalAssistViewModel {
                     throw LocalAssistError.generationDidNotFinish
                 }
 
+                let clock = ContinuousClock()
+                let prepareStarted = clock.now
+                let prepared = try await worker.prepareActions(finalSummary.actionDrafts)
+                collector.recordActionPreparation(prepareStarted.duration(to: clock.now))
+                collector.recordActionReviewReady()
+
                 let run = await worker.makeRun(
                     request: request,
                     summary: finalSummary,
-                    startedAt: startedAt
+                    startedAt: startedAt,
+                    stageTimings: collector.collected
                 )
-                let prepared = try await worker.prepareActions(run.summary.actionDrafts)
                 let history = await worker.record(run)
                 guard !Task.isCancelled else { return }
                 self.run = run
@@ -481,19 +574,44 @@ private extension LocalAssistViewModel {
         }
     }
 
+    /// Minimum interval between published streaming-partial snapshots.
+    /// The model can emit partials far faster than a human can read them;
+    /// coalescing to a stable cadence keeps SwiftUI diffing bounded instead
+    /// of re-rendering the card for every token. Terminal updates (summary
+    /// or a complete partial) always publish immediately.
+    private static let partialPublishInterval: Duration = .milliseconds(80)
+
     /// Drains one generation stream into the UI state, returning the final
     /// summary if the stream produced one. Stops quietly on cancellation —
-    /// the caller decides whether a nil summary is an error.
+    /// the caller decides whether a nil summary is an error. Feeds every
+    /// update into the stage-timing collector.
     func drain(
-        _ stream: AsyncThrowingStream<SummaryGenerationUpdate, Error>
+        _ stream: AsyncThrowingStream<SummaryGenerationUpdate, Error>,
+        collector: inout StageTimingCollector
     ) async throws -> StructuredSummary? {
         var finalSummary: StructuredSummary?
+        let clock = ContinuousClock()
+        var lastPartialPublishedAt: ContinuousClock.Instant?
+
         for try await update in stream {
             guard !Task.isCancelled else { return finalSummary }
+            collector.record(
+                phase: update.phase,
+                hasPartial: update.partial != nil,
+                hasSummary: update.summary != nil
+            )
             generationPhase = update.phase
             generationMessage = update.message
             if let partial = update.partial {
-                streamingPartial = partial
+                let now = clock.now
+                let isTerminal = partial.isComplete || update.summary != nil
+                let cadenceElapsed = lastPartialPublishedAt.map {
+                    $0.duration(to: now) >= Self.partialPublishInterval
+                } ?? true
+                if isTerminal || cadenceElapsed {
+                    streamingPartial = partial
+                    lastPartialPublishedAt = now
+                }
             }
             if let summary = update.summary {
                 finalSummary = summary
@@ -503,244 +621,5 @@ private extension LocalAssistViewModel {
             }
         }
         return finalSummary
-    }
-}
-
-public actor LocalAssistWorker {
-    private let liveService: LocalAssistService
-    private let fallbackService: LocalAssistService
-    private let summarizer: FoundationModelsSummarizer
-    private let actionPreparer: any ToolActionPreparing
-    private let actionExecutor: any ToolActionExecuting
-    private let contactResolver: (any ContactResolving)?
-    private let toolCounter: ToolInvocationCounter
-    private var historyStore: RunHistoryStore?
-    private var historyStoreResolved: Bool
-
-    public init(
-        actionPreparer: any ToolActionPreparing = DraftOnlyToolActionPreparer(),
-        actionExecutor: (any ToolActionExecuting)? = nil,
-        contactResolver: (any ContactResolving)? = nil,
-        historyStore: RunHistoryStore? = nil
-    ) {
-        let counter = ToolInvocationCounter()
-        let summarizer = LocalAssistLiveFactory.makeSummarizer(
-            tools: LocalAssistToolkit.liveTools(counter: counter)
-        )
-        toolCounter = counter
-        self.summarizer = summarizer
-        liveService = LocalAssistService(model: summarizer)
-        fallbackService = LocalAssistService(
-            model: StaticStructuredModelClient(
-                state: .unavailable(ModelUnavailability(reason: .forcedOffline))
-            )
-        )
-        self.actionPreparer = actionPreparer
-        #if canImport(EventKit)
-            self.actionExecutor = actionExecutor ?? SystemActionExecutor.live()
-        #else
-            self.actionExecutor = actionExecutor ?? SimulatedActionExecutor()
-        #endif
-        #if canImport(Contacts)
-            // Contact enrichment can prompt for Contacts access; automation
-            // runs (UI tests, screenshots) must stay dialog-free, same as
-            // the onboarding sheet.
-            let isAutomationRun = ProcessInfo.processInfo.environment["LOCALASSIST_AUTO_RUN"] == "1"
-            self.contactResolver = contactResolver ?? (isAutomationRun ? nil : ContactsFrameworkResolver())
-        #else
-            self.contactResolver = contactResolver
-        #endif
-        self.historyStore = historyStore
-        // A nil store means "resolve the shared container on first use" —
-        // that lookup is an XPC call that can block for seconds on builds
-        // without a provisioned app group, and this initializer runs on the
-        // MainActor at launch. Deferring it into the actor keeps startup
-        // hang-free.
-        historyStoreResolved = historyStore != nil
-    }
-
-    private func store() -> RunHistoryStore? {
-        if !historyStoreResolved {
-            historyStoreResolved = true
-            historyStore = RunHistoryStore.sharedOrLocal()
-        }
-        return historyStore
-    }
-
-    public func prewarm() async {
-        await liveService.prewarm()
-    }
-
-    public func availability() async -> ModelAvailability {
-        await summarizer.availability()
-    }
-
-    public func streamSummary(
-        _ request: AssistantRequest,
-        forceFallback: Bool
-    ) async -> AsyncThrowingStream<SummaryGenerationUpdate, Error> {
-        await toolCounter.reset()
-        let service = forceFallback ? fallbackService : liveService
-        return service.streamSummary(request)
-    }
-
-    public func makeRun(
-        request: AssistantRequest,
-        summary: StructuredSummary,
-        startedAt: Date
-    ) async -> AssistantRun {
-        var summary = summary
-        summary.diagnostics.toolInvocationCount = await toolCounter.count
-
-        let finishedAt = Date()
-        return AssistantRun(
-            request: request,
-            summary: summary,
-            metrics: RunMetrics(
-                startedAt: startedAt,
-                finishedAt: finishedAt,
-                durationMilliseconds: max(0, finishedAt.timeIntervalSince(startedAt) * 1000),
-                source: summary.source,
-                suggestionCount: summary.suggestions.count,
-                actionDraftCount: summary.actionDrafts.count,
-                keyPointCount: summary.keyPoints.count,
-                inputCharacterCount: request.sourceText.count,
-                outputByteCount: (try? SummaryFormatter.jsonData(summary, prettyPrinted: false).count) ?? 0,
-                fallbackReason: summary.diagnostics.fallbackReason
-            )
-        )
-    }
-
-    public func prepareActions(_ drafts: [ToolActionDraft]) async throws -> [PreparedToolAction] {
-        var prepared: [PreparedToolAction] = []
-        for draft in drafts {
-            try Task.checkCancellation()
-            try prepared.append(await actionPreparer.prepare(enrichedWithContact(draft)))
-        }
-        return prepared
-    }
-
-    /// Fills a message draft's recipient phone/email from Contacts so the
-    /// composer opens already addressed, and settles an `auto` channel with
-    /// the personal-vs-work rule (saved with a phone number → Messages,
-    /// email-only → mail). Any lookup failure — access denied, no match —
-    /// leaves the draft untouched and the composer opens unaddressed.
-    private func enrichedWithContact(_ draft: ToolActionDraft) async -> ToolActionDraft {
-        guard draft.kind == .messageDraft,
-              let contactResolver,
-              let recipient = draft.payload["recipient"],
-              let match = try? await contactResolver.contacts(matching: recipient).first
-        else {
-            return draft
-        }
-        var enriched = draft
-        if let phone = match.phoneNumber {
-            enriched.payload["recipientPhone"] = phone
-        }
-        if let email = match.emailAddress {
-            enriched.payload["recipientEmail"] = email
-        }
-        let explicit = MessageChannel(rawValue: draft.payload["channel"] ?? "") ?? .auto
-        enriched.payload["channel"] = MessageChannelRouter.resolve(
-            explicit: explicit,
-            hasPhone: match.hasPhone,
-            hasEmail: match.hasEmail
-        ).rawValue
-        return enriched
-    }
-
-    public func execute(_ action: PreparedToolAction) async throws -> ExecutedToolAction {
-        try await actionExecutor.execute(action)
-    }
-
-    /// Composes the actual message for a confirmed communication action:
-    /// the on-device model writes a ready-to-send subject + body from the
-    /// captured note (Smart mode), with the deterministic template as the
-    /// always-works fallback. The LocalAssist signature lands at the end of
-    /// the body — visible and deletable in the composer.
-    public func composedMessageAction(
-        _ action: PreparedToolAction,
-        capturedNote: String,
-        useModel: Bool
-    ) async -> PreparedToolAction {
-        guard action.draft.kind == .messageDraft else {
-            return action
-        }
-        let payload = action.draft.payload
-        let task = payload["subject"] ?? action.draft.title
-        let recipient = payload["recipient"]
-        let channel = MessageChannelRouter.resolve(
-            explicit: MessageChannel(rawValue: payload["channel"] ?? "") ?? .auto,
-            hasPhone: payload["recipientPhone"] != nil,
-            hasEmail: payload["recipientEmail"] != nil
-        )
-
-        // Routed commands arrive with the message already written (the
-        // router drafts at parse time), and the user just reviewed exactly
-        // that text on the card — recomposing here would replace what they
-        // approved. Only the signature is appended.
-        if payload["composed"] == "true", let body = payload["body"], !body.isEmpty {
-            var updated = action
-            updated.draft.payload["body"] = body + MessageBranding.signature(for: channel)
-            return updated
-        }
-
-        var composed: ComposedMessageDraft?
-        if useModel, let modelDraft = await summarizer.composeMessage(
-            recipient: recipient,
-            task: task,
-            channelDescription: channel == .textMessage ? "text message" : "email",
-            capturedNote: capturedNote
-        ) {
-            composed = ComposedMessageDraft(subject: modelDraft.subject, body: modelDraft.body)
-        }
-        let final = composed ?? DeterministicMessageComposer.compose(
-            recipient: recipient,
-            title: task,
-            channel: channel
-        )
-
-        var updated = action
-        updated.draft.payload["subject"] = final.subject
-        updated.draft.payload["body"] = final.body + MessageBranding.signature(for: channel)
-        return updated
-    }
-
-    public func loadHistory() async -> [AssistantRun] {
-        guard let historyStore = store() else {
-            return []
-        }
-        return (try? await historyStore.load()) ?? []
-    }
-
-    public func setTask(_ taskID: String, completed: Bool, inRun runID: String) async -> [AssistantRun] {
-        guard let historyStore = store() else {
-            return []
-        }
-        if let updated = try? await historyStore.setTask(taskID, completed: completed, inRun: runID) {
-            LocalAssistWidgetRefresher.refresh()
-            return updated
-        }
-        return (try? await historyStore.load()) ?? []
-    }
-
-    public func record(_ run: AssistantRun) async -> [AssistantRun] {
-        guard let historyStore = store() else {
-            return [run]
-        }
-        let updated = (try? await historyStore.append(run)) ?? [run]
-        LocalAssistWidgetRefresher.refresh()
-        return updated
-    }
-
-    public func clearHistory() async {
-        try? await store()?.clear()
-        await summarizer.resetConversation()
-    }
-
-    /// Read-only transcript of the shared model session for the Settings
-    /// diagnostics view — value types only, mapped at the adapter boundary.
-    public func transcriptDiagnostics() async -> [TranscriptEntrySnapshot] {
-        await summarizer.transcriptSnapshot()
     }
 }

@@ -1,5 +1,8 @@
 import LocalAssistCore
 import SwiftUI
+#if DEBUG
+    import LocalAssistEvalKit
+#endif
 
 struct SettingsFormView: View {
     @ObservedObject var viewModel: LocalAssistViewModel
@@ -7,6 +10,11 @@ struct SettingsFormView: View {
     /// history changes, not on every Form render.
     @State private var markdownExportURL: URL?
     @State private var jsonExportURL: URL?
+    @State private var diagnosticsExportURL: URL?
+    #if DEBUG
+        @State private var isMeasuring = false
+        @State private var measurementExportURL: URL?
+    #endif
     @State private var transcriptEntries: [TranscriptEntrySnapshot] = []
     @State private var transcriptExpanded = false
     @AppStorage(LocalAssistViewModel.priorityContactsDefaultsKey)
@@ -119,14 +127,56 @@ struct SettingsFormView: View {
                 } label: {
                     Label("Model session transcript", systemImage: "list.bullet.rectangle")
                 }
+                if let diagnosticsExportURL {
+                    ShareLink(item: diagnosticsExportURL) {
+                        Label("Export diagnostics (redacted JSON)", systemImage: "waveform.path.ecg")
+                    }
+                } else {
+                    Label("Export diagnostics (redacted JSON)", systemImage: "waveform.path.ecg")
+                        .foregroundStyle(.secondary)
+                }
             } header: {
                 Text("Diagnostics")
             } footer: {
                 Text(
                     "Read-only view of the current model session — instructions, prompts, "
-                        + "tool calls, and responses, each truncated for display. Stays on this phone."
+                        + "tool calls, and responses, each truncated for display. The diagnostics "
+                        + "export carries timings, counts, and device state only — never notes, "
+                        + "transcripts, or task text. Everything stays on this phone."
                 )
             }
+
+            #if DEBUG
+                Section {
+                    if isMeasuring {
+                        Label("Measuring… \(EvalDataset.standard.count) cases × 20", systemImage: "timer")
+                            .foregroundStyle(.secondary)
+                    } else if let measurementExportURL {
+                        ShareLink(item: measurementExportURL) {
+                            Label("Share measurement report", systemImage: "square.and.arrow.up")
+                        }
+                        Button {
+                            runMeasurement()
+                        } label: {
+                            Label("Run again", systemImage: "gauge.with.needle")
+                        }
+                    } else {
+                        Button {
+                            runMeasurement()
+                        } label: {
+                            Label("Run device measurement", systemImage: "gauge.with.needle")
+                        }
+                    }
+                } header: {
+                    Text("Measurement (debug builds only)")
+                } footer: {
+                    Text(
+                        "Runs the eval dataset 20× per case through the real pipeline and "
+                            + "exports timings, cohorts, and app-process footprint as JSON. "
+                            + "Not present in release builds."
+                    )
+                }
+            #endif
 
             Section {
             } footer: {
@@ -161,10 +211,31 @@ struct SettingsFormView: View {
         }
     }
 
+    #if DEBUG
+        private func runMeasurement() {
+            isMeasuring = true
+            measurementExportURL = nil
+            Task {
+                let report = await DeviceMeasurementHarness.run()
+                let stamp = LocalAssistDates.dateOnlyString(from: Date())
+                let url = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("LocalAssist-measurement-\(stamp).json")
+                if let data = try? report.jsonData(),
+                   (try? data.write(to: url, options: .atomic)) != nil {
+                    measurementExportURL = url
+                }
+                isMeasuring = false
+            }
+        }
+    #endif
+
     private func refreshExports() {
         let exports = viewModel.exportFileURLs()
         markdownExportURL = exports.markdown
         jsonExportURL = exports.json
+        Task {
+            diagnosticsExportURL = await viewModel.exportDiagnosticsURL()
+        }
     }
 
     static var versionString: String {

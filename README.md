@@ -58,10 +58,12 @@ The engine details that matter:
 | Session lifecycle | One `LanguageModelSession` per conversation — a new capture starts clean so nothing leaks from the last one, refine turns share the session, and prewarm (at launch and on the first keystroke) loads both the brief session and a ready routing session before Generate is tapped |
 | Context management | Rolling-window transcript compression (`ConversationMemory`); on projected or actual overflow the session is rebuilt with a condensed digest and retried |
 | Tool calling | Three Foundation Models `Tool`s: `CalendarAvailabilityTool` reads real free/busy so scheduling lands in open slots, `RemindersLookupTool` lists open reminders so the model never proposes a duplicate task, and `ContactsLookupTool` resolves first names to real people |
-| Error taxonomy | Every `GenerationError` and `UnavailableReason` maps to a typed `GenerationFailure`; the deterministic fallback keeps every capture producing a brief, with the exact reason preserved in diagnostics |
+| Error taxonomy | Every `GenerationError` and `UnavailableReason` maps to a typed `GenerationFailure` (including a `timedOut` case from bounded stage deadlines); the deterministic fallback keeps every capture producing a brief, with the reason and a stable machine-readable category preserved in diagnostics |
+| Bounded deadlines | Model streaming, command routing, tool reads, contact enrichment, and history persistence all run under cooperative deadlines — a wedged system service degrades into the typed-failure fallback path instead of hanging the run |
 | Due dates | The model resolves relative deadlines to ISO-8601 dates; a deterministic parser handles the rules path and confirmed writes |
 | Direct-command routing | Commands skip the brief: a few-shot `@Generable` router (greedy sampling — same command, same route) classifies message/email/event/reminder, extracts recipient + date + time, and drafts the message at parse time. Deferred shapes route too ("Hi amma how are you? Send this now" — the greeting names the recipient), and a multi-line dump partitions: command lines become one card each, the rest goes through the brief extractor, nothing vanishes. A regex router is the floor on every device |
-| Model output reconciliation | Every routed action passes deterministic checks earned from live failures: grounding against the command's own words, verb admissibility, clause-echo and duplicate collapse, and dates/times/locations that exist only when the command contains them — the model proposes, the rules engine disposes |
+| Model output reconciliation | Every routed action passes seven deterministic policies earned from live failures — admissible type, source grounding, clause-echo rejection, deduplication, location grounding, priority floor, temporal correction — each with a stable rule ID; what fired and whether each proposal was accepted, modified, or rejected is recorded in diagnostics without recording content. Generated dates carry pattern guides in the decoding contract and are validated against real calendar semantics (Feb 30 dies deterministically) |
+| Proper-noun recovery | A contact-aware post-final resolver corrects ASR name misses ("mirror" → "Mira") using phonetic-skeleton + edit-distance evidence against known contacts only, reporting ambiguity instead of guessing — measured in the speech eval's ablation ladder |
 
 ## System integration
 
@@ -81,7 +83,7 @@ The engine details that matter:
 # Full Xcode toolchain required: plain CommandLineTools builds but silently skips XCTest.
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 
-swift test                              # 135 tests
+swift test                              # 215 tests
 swift run localassist-selftest          # 47 end-to-end checks
 swift run localassist-eval --min-score 0.9
 swift run localassist --text "Call Mom tonight, pick up the birthday cake Saturday, and book the dentist for next week." --plain

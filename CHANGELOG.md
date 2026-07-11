@@ -4,6 +4,44 @@ All notable changes to LocalAssist are documented here.
 
 ## Unreleased
 
+### Production hardening (2026-07-11)
+- Briefs can be deleted: long-press a history card (or clear all) and the
+  run leaves local history atomically with a durable Spotlight tombstone;
+  a coordinator confirms the index deletion and retries at every launch,
+  and pending deletions never surface in Shortcuts/Siri queries even
+  across a crash window.
+- Settings → Diagnostics gains a redacted JSON export: stage timings,
+  counts, failure categories, reconciler rule IDs, device state, and the
+  last voice session's timeline — structurally content-free, user-initiated
+  only.
+- Every generation failure is typed (now including bounded-deadline
+  `timedOut`), falls back deterministically, and records a stable
+  machine-readable category. Model streaming, command routing, tool reads,
+  contact enrichment, and history persistence all run under cooperative
+  deadlines.
+- The routed-action reconciler's seven policies carry stable rule IDs and
+  record each proposal's disposition (accepted/modified/rejected) into
+  diagnostics — never content. Generated dates/times are pattern-guided in
+  the decoding contract and validated against real calendar semantics.
+- Voice capture rides out calls, Siri, media-services resets,
+  backgrounding, and memory warnings by draining instead of dying, and
+  records a monotonic per-session timeline (tap → audio ready → first
+  partial → drain).
+- A contact-aware proper-noun resolver corrects ASR name misses
+  ("mirror" → "Mira") with phonetic + edit-distance evidence, reporting
+  ambiguity instead of guessing; the speech eval gained a per-case
+  ablation ladder (gold → accumulator → name-corrected → finals-only)
+  that measures its downstream recovery.
+- Run metrics grew backward-compatible stage timings (TTFT → review-ready
+  → persistence), device/build environment, and context-window
+  bookkeeping; streaming UI partials coalesce to a stable cadence.
+- Eval due dates now compare as resolved local calendar dates rather than
+  substrings; the benchmark measures injected incomplete-stream and
+  normalization-failure fallbacks (detection → first partial → completion);
+  a debug-only device harness runs the eval dataset 20× per case with
+  cold/warm cohorts and app-process footprint. CI builds with
+  warnings-as-errors under Swift 6 strict concurrency.
+
 ### Product
 - A dump of one command per line becomes one card per line: "text
   amma…" / "email HR…" / "meeting with Rahul…" / "remind me…" each

@@ -21,6 +21,11 @@ jobs:
         run: |
           which swiftlint || brew install swiftlint
           swiftlint lint --reporter github-actions-logging
+      - name: Strict-concurrency build (warnings as errors)
+        # Swift 6 language mode already enforces complete concurrency
+        # checking; -warnings-as-errors keeps the tree warning-free so a
+        # new data-race diagnostic can never land silently.
+        run: swift build -Xswiftc -warnings-as-errors
       - name: Test
         run: |
           swift test 2>&1 | tee /tmp/swift-test.log

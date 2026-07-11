@@ -59,6 +59,17 @@ public struct RunMetrics: Codable, Equatable, Sendable {
     public var outputByteCount: Int
     public var fallbackReason: String?
     public var cancelled: Bool
+    // All 2026-07 additions are optional so history saved before them
+    // decodes unchanged (synthesized Codable reads missing keys as nil).
+    /// Per-stage latency offsets, ContinuousClock-measured.
+    public var stageTimings: RunStageTimings?
+    /// Device/build/thermal snapshot the numbers were taken under.
+    public var environment: RunEnvironment?
+    /// Context-window bookkeeping from the model adapter.
+    public var context: ContextWindowDiagnostics?
+    /// Stable machine-readable failure taxonomy case when the run fell
+    /// back (`GenerationFailure.category`) — never free-form detail text.
+    public var failureCategory: String?
 
     public init(
         startedAt: Date,
@@ -71,7 +82,11 @@ public struct RunMetrics: Codable, Equatable, Sendable {
         inputCharacterCount: Int = 0,
         outputByteCount: Int = 0,
         fallbackReason: String? = nil,
-        cancelled: Bool = false
+        cancelled: Bool = false,
+        stageTimings: RunStageTimings? = nil,
+        environment: RunEnvironment? = nil,
+        context: ContextWindowDiagnostics? = nil,
+        failureCategory: String? = nil
     ) {
         self.startedAt = startedAt
         self.finishedAt = finishedAt
@@ -84,6 +99,10 @@ public struct RunMetrics: Codable, Equatable, Sendable {
         self.outputByteCount = outputByteCount
         self.fallbackReason = fallbackReason
         self.cancelled = cancelled
+        self.stageTimings = stageTimings
+        self.environment = environment
+        self.context = context
+        self.failureCategory = failureCategory
     }
 }
 

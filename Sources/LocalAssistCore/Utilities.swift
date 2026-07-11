@@ -4,6 +4,10 @@ public extension Notification.Name {
     /// Posted when an external entry point (App Shortcut, Lock Screen widget
     /// deep link) asks the app to start a voice capture immediately.
     static let localAssistCaptureRequested = Notification.Name("com.saithej.localassist.capture-requested")
+
+    /// Posted after runs were deleted locally (single delete or clear-all),
+    /// so the app layer can process the Spotlight tombstone outbox.
+    static let localAssistHistoryDidDelete = Notification.Name("com.saithej.localassist.history-did-delete")
 }
 
 enum OrderedUnique {

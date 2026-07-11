@@ -47,7 +47,10 @@ let package = Package(
             dependencies: [
                 "LocalAssistCore",
                 "LocalAssistFoundationModels",
-                "LocalAssistSystemTools"
+                "LocalAssistSystemTools",
+                // Debug-only DeviceMeasurementHarness drives EvalDataset;
+                // EvalKit is Core-only, so the app pays no extra weight.
+                "LocalAssistEvalKit"
             ]
         ),
         .executableTarget(
@@ -91,7 +94,8 @@ let package = Package(
                 "LocalAssistCore",
                 "LocalAssistEvalKit",
                 "LocalAssistSystemTools",
-                "LocalAssistAppUI"
+                "LocalAssistAppUI",
+                "LocalAssistAppIntents"
             ],
             swiftSettings: [
                 .unsafeFlags([

@@ -30,6 +30,21 @@ struct LocalAssistBenchmarks {
             let peakAfter = peakMemoryMB()
             let cancellation = await measureCancellation(cancelAfterMS: arguments.cancelAfterMS)
 
+            // Injected failure paths: how fast the app notices a broken
+            // model pass and how fast the deterministic engine answers.
+            // Incomplete stream = the model connection died mid-generation;
+            // normalization failure = a schema-valid but unusable payload.
+            let incompleteStream = await measureFallbackScenario(
+                model: StaticStructuredModelClient(script: [
+                    StructuredSummaryPartial(overview: "Half a headline", isComplete: false)
+                ])
+            )
+            let normalizationFailure = await measureFallbackScenario(
+                model: StaticStructuredModelClient(script: [
+                    StructuredSummaryPartial(overview: "", keyPoints: [], isComplete: true)
+                ])
+            )
+
             let report = BenchmarkReport(
                 startedAt: startedAt,
                 completedAt: Date(),
@@ -48,7 +63,9 @@ struct LocalAssistBenchmarks {
                 cancellationSucceeded: cancellation.succeeded,
                 fallbackRate: measured.fallbackRate,
                 successCount: measured.successCount,
-                failureCount: measured.failureCount
+                failureCount: measured.failureCount,
+                incompleteStreamFallback: incompleteStream,
+                normalizationFailureFallback: normalizationFailure
             )
 
             if let outputPath = arguments.outputPath {
@@ -102,6 +119,63 @@ struct LocalAssistBenchmarks {
         }
 
         return measurements
+    }
+
+    /// Milestones observed while draining one injected-failure stream.
+    private struct FallbackMilestones {
+        var failureDetectedAt: ContinuousClock.Instant?
+        var firstFallbackPartialAt: ContinuousClock.Instant?
+        var completedAt: ContinuousClock.Instant?
+        var completedSource: GenerationSource?
+
+        mutating func observe(_ update: SummaryGenerationUpdate, at now: ContinuousClock.Instant) {
+            if update.phase == .fallback, failureDetectedAt == nil {
+                failureDetectedAt = now
+            }
+            if update.phase == .fallback, update.partial != nil, firstFallbackPartialAt == nil {
+                firstFallbackPartialAt = now
+            }
+            if let summary = update.summary {
+                completedAt = now
+                completedSource = summary.source
+            }
+        }
+    }
+
+    /// Streams one run against a model scripted to fail after the pass,
+    /// timing failure detection → first fallback partial → completed
+    /// fallback summary. The stream's `.fallback` phase is the detection
+    /// signal — the exact moment the service gave up on the model pass.
+    private static func measureFallbackScenario(
+        model: StaticStructuredModelClient
+    ) async -> FallbackScenarioResult {
+        let service = LocalAssistService(model: model)
+        let request = AssistantRequest(sourceText: sampleText)
+        let started = ContinuousClock.now
+        var milestones = FallbackMilestones()
+
+        do {
+            for try await update in service.streamSummary(request) {
+                milestones.observe(update, at: ContinuousClock.now)
+            }
+        } catch {
+            return .failed
+        }
+
+        guard let failureDetectedAt = milestones.failureDetectedAt,
+              let completedAt = milestones.completedAt,
+              milestones.completedSource == .deterministicFallback
+        else {
+            return .failed
+        }
+        return FallbackScenarioResult(
+            succeeded: true,
+            detectionMilliseconds: started.duration(to: failureDetectedAt).milliseconds,
+            detectionToFirstPartialMilliseconds: milestones.firstFallbackPartialAt.map {
+                failureDetectedAt.duration(to: $0).milliseconds
+            } ?? 0,
+            detectionToCompletionMilliseconds: failureDetectedAt.duration(to: completedAt).milliseconds
+        )
     }
 
     private static func measureCancellation(cancelAfterMS: Int) async -> (succeeded: Bool, latencyMS: Double) {
@@ -183,6 +257,17 @@ private struct BenchmarkConfiguration: Codable, Equatable, Sendable {
     var cancelAfterMS: Int
 }
 
+private struct FallbackScenarioResult: Codable, Equatable, Sendable {
+    /// The run ended in a completed deterministic-fallback summary.
+    var succeeded: Bool
+    /// Run start → the service declaring the model pass failed.
+    var detectionMilliseconds: Double
+    /// Failure declared → first fallback partial visible.
+    var detectionToFirstPartialMilliseconds: Double
+    /// Failure declared → completed fallback summary.
+    var detectionToCompletionMilliseconds: Double
+}
+
 private struct BenchmarkReport: Codable, Equatable, Sendable {
     var startedAt: Date
     var completedAt: Date
@@ -197,6 +282,8 @@ private struct BenchmarkReport: Codable, Equatable, Sendable {
     var fallbackRate: Double
     var successCount: Int
     var failureCount: Int
+    var incompleteStreamFallback: FallbackScenarioResult
+    var normalizationFailureFallback: FallbackScenarioResult
 
     func rendered() -> String {
         """
@@ -216,6 +303,8 @@ private struct BenchmarkReport: Codable, Equatable, Sendable {
         peak memory delta: \(peakMemoryDeltaMB.roundedString) MB
         cancellation: \(cancellationSucceeded ? "passed" : "failed") in \(cancellationMilliseconds.roundedString) ms
         fallback rate: \((fallbackRate * 100).roundedString)%
+        incomplete-stream fallback: \(incompleteStreamFallback.renderedLine)
+        normalization-failure fallback: \(normalizationFailureFallback.renderedLine)
         """
     }
 
@@ -224,6 +313,24 @@ private struct BenchmarkReport: Codable, Equatable, Sendable {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return try encoder.encode(self)
+    }
+}
+
+private extension FallbackScenarioResult {
+    static let failed = FallbackScenarioResult(
+        succeeded: false,
+        detectionMilliseconds: 0,
+        detectionToFirstPartialMilliseconds: 0,
+        detectionToCompletionMilliseconds: 0
+    )
+
+    var renderedLine: String {
+        guard succeeded else {
+            return "FAILED"
+        }
+        return "detected at \(detectionMilliseconds.roundedString) ms, "
+            + "first fallback partial +\(detectionToFirstPartialMilliseconds.roundedString) ms, "
+            + "completed +\(detectionToCompletionMilliseconds.roundedString) ms"
     }
 }
 

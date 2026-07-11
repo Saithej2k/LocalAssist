@@ -51,13 +51,21 @@ struct RoutedCommandAction: Sendable {
     """)
     var contactName: String
 
+    // Pattern guides make the date/time shapes part of the decoding
+    // constraint itself — the decoder cannot emit "next Tuesday" or
+    // "3pm-ish" here. Calendar semantics (Feb 30th matches the pattern but
+    // is not a date) are validated deterministically downstream by
+    // `GeneratedDateTimeValidator` in the reconciler.
     @Guide(description: """
     Calendar date in ISO 8601 format (YYYY-MM-DD) resolved relative to \
     today's date. Empty string if no date is mentioned.
-    """)
+    """, .pattern(/(\d{4}-\d{2}-\d{2})?/))
     var date: String
 
-    @Guide(description: "Time in HH:mm 24-hour format. Empty string if no time is mentioned.")
+    @Guide(
+        description: "Time in HH:mm 24-hour format. Empty string if no time is mentioned.",
+        .pattern(/(([01]\d|2[0-3]):[0-5]\d)?/)
+    )
     var time: String
 
     @Guide(description: "Physical location or place name if mentioned. Empty string if none.")

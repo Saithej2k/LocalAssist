@@ -155,11 +155,111 @@ public actor RunHistoryStore {
         return runs
     }
 
+    // MARK: - Deletion + Spotlight tombstones
+
+    /// The Spotlight-deletion outbox lives in a sidecar file next to the
+    /// history, so the history format itself is untouched — pre-outbox
+    /// installs "migrate" by the sidecar simply not existing yet.
+    public nonisolated var spotlightOutboxURL: URL {
+        fileURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("spotlight-outbox.json")
+    }
+
+    /// A run the user deleted whose Spotlight entry has not been confirmed
+    /// gone yet. IDs only, never content.
+    public struct SpotlightTombstone: Codable, Equatable, Sendable {
+        public var runID: String
+        public var deletedAt: Date
+
+        public init(runID: String, deletedAt: Date = Date()) {
+            self.runID = runID
+            self.deletedAt = deletedAt
+        }
+    }
+
+    /// Deletes one run. Ordering is the crash-safety contract: the
+    /// tombstone is durable BEFORE the run leaves the history file, so no
+    /// crash window exists where a run is gone locally but its Spotlight
+    /// entry has no record demanding cleanup. Spotlight I/O itself happens
+    /// outside this actor (see `SpotlightDeletionCoordinator`); entity
+    /// queries filter tombstoned IDs so a pending deletion is already
+    /// invisible.
+    @discardableResult
+    public func delete(runID: String) throws -> [AssistantRun] {
+        var runs = try load()
+        guard runs.contains(where: { $0.id == runID }) else {
+            return runs
+        }
+        var outbox = loadOutbox()
+        if !outbox.contains(where: { $0.runID == runID }) {
+            outbox.append(SpotlightTombstone(runID: runID))
+        }
+        try saveOutbox(outbox)
+        runs.removeAll { $0.id == runID }
+        try save(runs)
+        return runs
+    }
+
+    /// Clear-all follows the same contract: every current run is
+    /// tombstoned durably first, then the history file goes.
     public func clear() throws {
+        let runs = (try? load()) ?? []
+        if !runs.isEmpty {
+            var outbox = loadOutbox()
+            let known = Set(outbox.map(\.runID))
+            for run in runs where !known.contains(run.id) {
+                outbox.append(SpotlightTombstone(runID: run.id))
+            }
+            try saveOutbox(outbox)
+        }
         if FileManager.default.fileExists(atPath: fileURL.path) {
             try FileManager.default.removeItem(at: fileURL)
         }
         cache = []
+    }
+
+    /// Run IDs whose Spotlight entries still need deletion.
+    public func pendingSpotlightDeletions() -> [SpotlightTombstone] {
+        loadOutbox()
+    }
+
+    /// Acknowledges that Spotlight confirmed these deletions; their
+    /// tombstones are retired. Failed IDs stay for the next launch retry.
+    public func acknowledgeSpotlightDeletions(_ runIDs: [String]) throws {
+        let acknowledged = Set(runIDs)
+        let remaining = loadOutbox().filter { !acknowledged.contains($0.runID) }
+        try saveOutbox(remaining)
+    }
+
+    private func loadOutbox() -> [SpotlightTombstone] {
+        guard FileManager.default.fileExists(atPath: spotlightOutboxURL.path),
+              let data = try? Data(contentsOf: spotlightOutboxURL),
+              !data.isEmpty
+        else {
+            return []
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (try? decoder.decode([SpotlightTombstone].self, from: data)) ?? []
+    }
+
+    private func saveOutbox(_ outbox: [SpotlightTombstone]) throws {
+        guard !outbox.isEmpty else {
+            if FileManager.default.fileExists(atPath: spotlightOutboxURL.path) {
+                try FileManager.default.removeItem(at: spotlightOutboxURL)
+            }
+            return
+        }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(outbox)
+        try FileManager.default.createDirectory(
+            at: spotlightOutboxURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try data.write(to: spotlightOutboxURL, options: [.atomic])
     }
 
     public func aggregate() throws -> AggregateRunMetrics {
