@@ -37,10 +37,33 @@
             /// eligible device with Apple Intelligence enabled); false
             /// measures the deterministic engine.
             public var useModel: Bool
+            /// A small quiet period between live-model samples reduces
+            /// self-inflicted rate limiting and thermal escalation. The
+            /// deterministic path stays unpaced for fast tests.
+            public var interSampleDelay: Duration
+            /// A fallback means the attempted model pass already consumed
+            /// time and resources. Give the system longer to recover before
+            /// the next measured request.
+            public var fallbackRecoveryDelay: Duration
+            /// Maximum idle wait for serious/critical thermal pressure to
+            /// return to nominal/fair before the cohort aborts loudly.
+            public var thermalWaitTimeout: Duration
+            public var thermalPollInterval: Duration
 
-            public init(repetitions: Int = 20, useModel: Bool = true) {
+            public init(
+                repetitions: Int = 20,
+                useModel: Bool = true,
+                interSampleDelay: Duration? = nil,
+                fallbackRecoveryDelay: Duration? = nil,
+                thermalWaitTimeout: Duration = .seconds(120),
+                thermalPollInterval: Duration = .seconds(5)
+            ) {
                 self.repetitions = max(1, repetitions)
                 self.useModel = useModel
+                self.interSampleDelay = interSampleDelay ?? (useModel ? .seconds(5) : .zero)
+                self.fallbackRecoveryDelay = fallbackRecoveryDelay ?? (useModel ? .seconds(30) : .zero)
+                self.thermalWaitTimeout = thermalWaitTimeout
+                self.thermalPollInterval = thermalPollInterval
             }
         }
 
@@ -58,7 +81,14 @@
             public var generationCompletedMilliseconds: Double
             public var actionReviewReadyMilliseconds: Double
             public var source: GenerationSource
+            /// Stable machine-readable reason when this sample completed
+            /// through fallback. Prose fallback reasons are intentionally
+            /// excluded because framework errors can contain input text.
+            public var fallbackCategory: String?
             public var footprintMB: Double
+            /// Per-sample conditions, rather than one optimistic snapshot
+            /// taken only when the campaign began.
+            public var environment: RunEnvironment?
         }
 
         /// A sample that failed, preserved with its typed category —
@@ -114,7 +144,11 @@
             public var environment: RunEnvironment
             public var configurationRepetitions: Int
             public var usedModel: Bool
+            public var expectedSource: GenerationSource
             public var samples: [Sample]
+            /// Completed responses from an engine other than the requested
+            /// one. They remain evidence, but never enter model percentiles.
+            public var unexpectedSourceSamples: [Sample]
             public var failedSamples: [FailedSample]
             public var fallbackSamples: [FallbackSample]
             public var memory: MemoryProfile
@@ -123,6 +157,11 @@
             /// source; otherwise the warm cohort was aborted and this
             /// field says why.
             public var warmupOutcome: WarmupOutcome
+            /// True only when the warm cohort has traceable provenance, the
+            /// full expected sample count, no wrong-source/failing samples,
+            /// stable power, and nominal/fair thermal conditions.
+            public var warmClaimReady: Bool
+            public var warmClaimBlockingReasons: [String]
             /// The active cold-launch campaign and its records, when one
             /// exists. Only records carrying this campaign's ID are
             /// included — different campaigns never fold together.
@@ -138,7 +177,9 @@
                 return try encoder.encode(self)
             }
         }
+    }
 
+    extension DeviceMeasurementHarness {
         // MARK: - Main measurement
 
         /// `worker` defaults to the production configuration — the same
@@ -153,82 +194,65 @@
             service injectedService: LocalAssistService? = nil
         ) async -> Report {
             let startedAt = Date()
+            let campaignEnvironment = RunEnvironment.current(coldStart: false)
             let service: LocalAssistService = injectedService
                 ?? (configuration.useModel
                     ? LocalAssistLiveFactory.makeService(tools: LocalAssistToolkit.liveTools())
                     : LocalAssistService())
-
             let monitor = MemoryMonitor()
             monitor.start()
-
-            // One unmeasured warmup consumes the session-cold (or
-            // process-cold) first generation. Only a warmup that SUCCEEDS
-            // from the expected engine earns the samples their "warm"
-            // label — a failed or wrong-source warmup aborts the warm
-            // cohort instead of collecting numbers the label would lie
-            // about. Cold statistics come from the cold-launch campaign,
-            // not from here.
             let expectedSource: GenerationSource = configuration.useModel
                 ? .foundationModels
                 : .deterministicFallback
-            let warmupOutcome: WarmupOutcome
-            do {
-                let warmupSummary = try await service.summarize(AssistantRequest(
-                    sourceText: EvalDataset.standard[0].input,
-                    maxSuggestions: EvalDataset.standard[0].maxSuggestions
-                ))
-                warmupOutcome = warmupSummary.source == expectedSource
-                    ? .succeeded(source: warmupSummary.source)
-                    : .wrongSource(expected: expectedSource, actual: warmupSummary.source)
-            } catch let failure as GenerationFailure {
-                warmupOutcome = .failed(category: failure.category)
-            } catch {
-                warmupOutcome = .failed(
-                    category: error is CancellationError ? "cancelled" : "untyped"
-                )
-            }
-
-            var samples: [Sample] = []
-            var failures: [FailedSample] = []
-            if warmupOutcome.isClaimable {
-                for evalCase in EvalDataset.standard {
-                    for repetition in 0 ..< configuration.repetitions {
-                        switch await measureOne(
-                            evalCase: evalCase,
-                            repetition: repetition,
-                            cohort: .warm,
-                            service: service,
-                            worker: worker
-                        ) {
-                        case .success(let sample):
-                            samples.append(sample)
-                        case .failure(let failed):
-                            failures.append(failed)
-                        }
-                    }
-                }
-            }
-
+            let warmupOutcome = await performWarmup(
+                configuration: configuration,
+                expectedSource: expectedSource,
+                service: service
+            )
+            let collection = await collectWarmSamples(
+                configuration: configuration,
+                expectedSource: expectedSource,
+                warmupOutcome: warmupOutcome,
+                service: service,
+                worker: worker
+            )
             let fallbackSamples = await measureFallbacks(
                 repetitions: max(configuration.repetitions / 2, 5)
             )
             let memory = monitor.stop()
+            let expectedWarmSampleCount = EvalDataset.standard.count * configuration.repetitions
+            let warmClaimBlockingReasons = warmClaimBlockers(WarmClaimEvidence(
+                expectedSource: expectedSource,
+                expectedSampleCount: expectedWarmSampleCount,
+                samples: collection.samples,
+                unexpectedSourceSamples: collection.unexpectedSourceSamples,
+                failures: collection.failures,
+                warmupOutcome: warmupOutcome,
+                environment: campaignEnvironment,
+                memory: memory
+            ))
 
             return Report(
                 startedAt: startedAt,
                 completedAt: Date(),
-                environment: .current(coldStart: false),
+                environment: campaignEnvironment,
                 configurationRepetitions: configuration.repetitions,
                 usedModel: configuration.useModel,
-                samples: samples,
-                failedSamples: failures,
+                expectedSource: expectedSource,
+                samples: collection.samples,
+                unexpectedSourceSamples: collection.unexpectedSourceSamples,
+                failedSamples: collection.failures,
                 fallbackSamples: fallbackSamples,
                 memory: memory,
                 warmupOutcome: warmupOutcome,
+                warmClaimReady: warmClaimBlockingReasons.isEmpty,
+                warmClaimBlockingReasons: warmClaimBlockingReasons,
                 coldLaunchCampaign: ColdLaunchCampaignStore.summaryOfActiveCampaign(),
                 caveats: [
                     "warm samples exist only when warmupOutcome is .succeeded from the expected "
                         + "engine; a failed or wrong-source warmup aborts the warm cohort. "
+                        + "Later wrong-source responses are preserved in unexpectedSourceSamples "
+                        + "and never enter model percentiles. "
                         + "Cold statistics come from the cold-launch campaign "
                         + "(LOCALASSIST_MEASURE_PROCESS_COLD launches, MeasurementColdLaunchTests)",
                     "20 cold launches support an aggregate cold p95 only; "
@@ -239,6 +263,190 @@
                     "text inputs from EvalDataset.standard; real-speech numbers require the physical speech corpus",
                 ]
             )
+        }
+
+        private struct WarmCollection {
+            var samples: [Sample] = []
+            var unexpectedSourceSamples: [Sample] = []
+            var failures: [FailedSample] = []
+        }
+
+        /// Consumes the session-cold generation without admitting it to the
+        /// warm cohort. A wrong-source or failed warmup aborts collection.
+        private static func performWarmup(
+            configuration: Configuration,
+            expectedSource: GenerationSource,
+            service: LocalAssistService
+        ) async -> WarmupOutcome {
+            if let category = await thermalFailureCategory(configuration: configuration) {
+                return .failed(category: category)
+            }
+            do {
+                let evalCase = EvalDataset.standard[0]
+                let summary = try await service.summarize(AssistantRequest(
+                    sourceText: evalCase.input,
+                    maxSuggestions: evalCase.maxSuggestions
+                ))
+                return summary.source == expectedSource
+                    ? .succeeded(source: summary.source)
+                    : .wrongSource(expected: expectedSource, actual: summary.source)
+            } catch let failure as GenerationFailure {
+                return .failed(category: failure.category)
+            } catch {
+                return .failed(category: error is CancellationError ? "cancelled" : "untyped")
+            }
+        }
+
+        private static func collectWarmSamples(
+            configuration: Configuration,
+            expectedSource: GenerationSource,
+            warmupOutcome: WarmupOutcome,
+            service: LocalAssistService,
+            worker: LocalAssistWorker
+        ) async -> WarmCollection {
+            guard warmupOutcome.isClaimable else {
+                return WarmCollection()
+            }
+            var collection = WarmCollection()
+            measurementLoop: for evalCase in EvalDataset.standard {
+                for repetition in 0 ..< configuration.repetitions {
+                    guard !Task.isCancelled else {
+                        collection.failures.append(FailedSample(
+                            caseID: evalCase.id, repetition: repetition,
+                            cohort: .warm, failureCategory: "cancelled"
+                        ))
+                        break measurementLoop
+                    }
+                    if let category = await thermalFailureCategory(configuration: configuration) {
+                        collection.failures.append(FailedSample(
+                            caseID: evalCase.id, repetition: repetition,
+                            cohort: .warm, failureCategory: category
+                        ))
+                        break measurementLoop
+                    }
+
+                    switch await measureOne(
+                        evalCase: evalCase, repetition: repetition, cohort: .warm,
+                        service: service, worker: worker
+                    ) {
+                    case .success(let sample):
+                        if sample.source == expectedSource {
+                            collection.samples.append(sample)
+                        } else {
+                            collection.unexpectedSourceSamples.append(sample)
+                        }
+                        let delay = sample.source == expectedSource
+                            ? configuration.interSampleDelay
+                            : configuration.fallbackRecoveryDelay
+                        if delay > .zero {
+                            try? await Task.sleep(for: delay)
+                        }
+                    case .failure(let failure):
+                        collection.failures.append(failure)
+                        if configuration.fallbackRecoveryDelay > .zero {
+                            try? await Task.sleep(for: configuration.fallbackRecoveryDelay)
+                        }
+                    }
+                }
+            }
+            return collection
+        }
+
+        private static func thermalFailureCategory(
+            configuration: Configuration
+        ) async -> String? {
+            guard configuration.useModel else {
+                return nil
+            }
+            let ready = await MeasurementClaimPolicy.waitForThermalEligibility(
+                timeout: configuration.thermalWaitTimeout,
+                pollInterval: configuration.thermalPollInterval
+            )
+            guard !ready else {
+                return nil
+            }
+            return Task.isCancelled ? "cancelled" : "thermalBudgetExceeded"
+        }
+
+        private struct WarmClaimEvidence {
+            var expectedSource: GenerationSource
+            var expectedSampleCount: Int
+            var samples: [Sample]
+            var unexpectedSourceSamples: [Sample]
+            var failures: [FailedSample]
+            var warmupOutcome: WarmupOutcome
+            var environment: RunEnvironment
+            var memory: MemoryProfile
+        }
+
+        private static func warmClaimBlockers(_ evidence: WarmClaimEvidence) -> [String] {
+            warmRunBlockers(evidence) + warmSampleBlockers(evidence)
+        }
+
+        private static func warmRunBlockers(_ evidence: WarmClaimEvidence) -> [String] {
+            var blockers: [String] = []
+            if !MeasurementClaimPolicy.hasTraceableCommit(evidence.environment) {
+                blockers.append("missing or dirty commit SHA")
+            }
+            if !MeasurementClaimPolicy.hasStablePower(evidence.environment) {
+                blockers.append("Low Power Mode was enabled")
+            }
+            if !MeasurementClaimPolicy.isThermallyEligible(evidence.environment) {
+                blockers.append("campaign started at thermal state \(evidence.environment.thermalState)")
+            }
+            if evidence.warmupOutcome != .succeeded(source: evidence.expectedSource) {
+                blockers.append("warmup did not succeed from \(evidence.expectedSource.rawValue)")
+            }
+            if evidence.samples.count != evidence.expectedSampleCount {
+                blockers.append(
+                    "expected \(evidence.expectedSampleCount) warm samples, "
+                        + "recorded \(evidence.samples.count)"
+                )
+            }
+            if !evidence.unexpectedSourceSamples.isEmpty {
+                blockers.append(
+                    "\(evidence.unexpectedSourceSamples.count) warm samples used an unexpected source"
+                )
+            }
+            if !evidence.failures.isEmpty {
+                blockers.append("\(evidence.failures.count) warm samples failed")
+            }
+            if evidence.memory.sampleCount == 0 {
+                blockers.append("memory sampler recorded no observations")
+            }
+            return blockers
+        }
+
+        private static func warmSampleBlockers(_ evidence: WarmClaimEvidence) -> [String] {
+            var blockers: [String] = []
+            let mislabeledSourceCount = evidence.samples.filter {
+                $0.source != evidence.expectedSource
+            }.count
+            if mislabeledSourceCount > 0 {
+                blockers.append("\(mislabeledSourceCount) expected-source samples were mislabeled")
+            }
+
+            let measuredSamples = evidence.samples + evidence.unexpectedSourceSamples
+            let missingEnvironments = measuredSamples.filter { $0.environment == nil }.count
+            if missingEnvironments > 0 {
+                blockers.append("\(missingEnvironments) warm samples lack per-sample environment data")
+            }
+            let thermallyInvalid = measuredSamples.compactMap(\.environment)
+                .filter { !MeasurementClaimPolicy.isThermallyEligible($0) }.count
+            if thermallyInvalid > 0 {
+                blockers.append("\(thermallyInvalid) warm samples exceeded the thermal budget")
+            }
+            let environmentMismatches = measuredSamples.compactMap(\.environment)
+                .filter {
+                    !MeasurementClaimPolicy.matchesPinnedEnvironment(
+                        $0,
+                        campaign: evidence.environment
+                    )
+                }.count
+            if environmentMismatches > 0 {
+                blockers.append("\(environmentMismatches) warm samples changed pinned environment")
+            }
+            return blockers
         }
 
         /// Cohort assignment is pure so it is unit-testable: the first
@@ -310,6 +518,7 @@
             let generationDone = clock.now
             _ = try? await worker.prepareActions(summary.actionDrafts)
             let reviewReady = clock.now
+            let environment = RunEnvironment.current(coldStart: cohort == .processCold)
 
             return .success(Sample(
                 caseID: evalCase.id,
@@ -321,7 +530,9 @@
                 generationCompletedMilliseconds: started.duration(to: generationDone).milliseconds,
                 actionReviewReadyMilliseconds: started.duration(to: reviewReady).milliseconds,
                 source: summary.source,
-                footprintMB: footprintMB()
+                fallbackCategory: summary.diagnostics.failureCategory,
+                footprintMB: footprintMB(),
+                environment: environment
             ))
         }
 
@@ -360,6 +571,9 @@
             return fallbackSamples
         }
 
+    }
+
+    extension DeviceMeasurementHarness {
         // MARK: - Process-cold launches
 
         /// When the app was launched with `LOCALASSIST_MEASURE_PROCESS_COLD`,
@@ -387,19 +601,10 @@
             }
 
             let useModel = info.environment["LOCALASSIST_FORCE_OFFLINE"] != "1"
-            let expectedSource: GenerationSource = useModel ? .foundationModels : .deterministicFallback
-            let campaign: ColdLaunchCampaignStore.Campaign
-            do {
-                // Explicit begin exists (`ColdLaunchCampaignStore.begin`);
-                // the launch hook begins one automatically when none is
-                // active so the first cold launch of a fresh campaign
-                // needs no separate setup step.
-                if let active = ColdLaunchCampaignStore.active() {
-                    campaign = active
-                } else {
-                    campaign = try ColdLaunchCampaignStore.begin(expectedSource: expectedSource)
-                }
-            } catch {
+            let expectedSource: GenerationSource = useModel
+                ? .foundationModels
+                : .deterministicFallback
+            guard let campaign = activeOrNewCampaign(expectedSource: expectedSource) else {
                 return false
             }
 
@@ -407,11 +612,56 @@
             // spreads over the cases instead of hammering one.
             let launchIndex = ColdLaunchCampaignStore.records(for: campaign).count
             let evalCase = EvalDataset.standard[launchIndex % EvalDataset.standard.count]
+            guard await coldThermalReady(useModel: useModel) else {
+                let category = Task.isCancelled ? "cancelled" : "thermalBudgetExceeded"
+                return appendColdRecord(coldFailureRecord(
+                    campaign: campaign,
+                    evalCase: evalCase,
+                    launchIndex: launchIndex,
+                    category: category
+                ))
+            }
             let service: LocalAssistService = useModel
                 ? LocalAssistLiveFactory.makeService(tools: LocalAssistToolkit.liveTools())
                 : LocalAssistService()
+            let record = await coldMeasurementRecord(
+                campaign: campaign,
+                evalCase: evalCase,
+                launchIndex: launchIndex,
+                service: service
+            )
+            return appendColdRecord(record)
+        }
 
-            let record: ColdLaunchCampaignStore.Record
+        private static func activeOrNewCampaign(
+            expectedSource: GenerationSource
+        ) -> ColdLaunchCampaignStore.Campaign? {
+            do {
+                if let active = ColdLaunchCampaignStore.active() {
+                    return active
+                }
+                return try ColdLaunchCampaignStore.begin(expectedSource: expectedSource)
+            } catch {
+                return nil
+            }
+        }
+
+        private static func coldThermalReady(useModel: Bool) async -> Bool {
+            guard useModel else {
+                return true
+            }
+            return await MeasurementClaimPolicy.waitForThermalEligibility(
+                timeout: .seconds(120),
+                pollInterval: .seconds(5)
+            )
+        }
+
+        private static func coldMeasurementRecord(
+            campaign: ColdLaunchCampaignStore.Campaign,
+            evalCase: EvalCase,
+            launchIndex: Int,
+            service: LocalAssistService
+        ) async -> ColdLaunchCampaignStore.Record {
             switch await measureOne(
                 evalCase: evalCase,
                 repetition: launchIndex,
@@ -420,23 +670,19 @@
                 worker: LocalAssistWorker()
             ) {
             case .success(let sample):
-                // A deterministic-fallback answer in a campaign meant to
-                // measure Foundation Models is not a cold model number —
-                // classified separately, never mixed into the samples.
                 let classification: ColdLaunchCampaignStore.Classification =
                     sample.source == campaign.expectedSource ? .sample : .unexpectedSource
-                record = ColdLaunchCampaignStore.Record(
+                return ColdLaunchCampaignStore.Record(
                     campaignID: campaign.id,
                     recordedAt: Date(),
-                    environment: .current(coldStart: true),
+                    environment: sample.environment ?? .current(coldStart: true),
                     expectedSource: campaign.expectedSource,
                     classification: classification,
                     sample: sample,
                     failure: nil
                 )
             case .failure(let failed):
-                // Cold-launch failures are campaign data too.
-                record = ColdLaunchCampaignStore.Record(
+                return ColdLaunchCampaignStore.Record(
                     campaignID: campaign.id,
                     recordedAt: Date(),
                     environment: .current(coldStart: true),
@@ -446,7 +692,32 @@
                     failure: failed
                 )
             }
+        }
 
+        private static func coldFailureRecord(
+            campaign: ColdLaunchCampaignStore.Campaign,
+            evalCase: EvalCase,
+            launchIndex: Int,
+            category: String
+        ) -> ColdLaunchCampaignStore.Record {
+            let failure = FailedSample(
+                caseID: evalCase.id,
+                repetition: launchIndex,
+                cohort: .processCold,
+                failureCategory: category
+            )
+            return ColdLaunchCampaignStore.Record(
+                campaignID: campaign.id,
+                recordedAt: Date(),
+                environment: .current(coldStart: true),
+                expectedSource: campaign.expectedSource,
+                classification: .failure,
+                sample: nil,
+                failure: failure
+            )
+        }
+
+        private static func appendColdRecord(_ record: ColdLaunchCampaignStore.Record) -> Bool {
             do {
                 try ColdLaunchCampaignStore.append(record)
                 return true

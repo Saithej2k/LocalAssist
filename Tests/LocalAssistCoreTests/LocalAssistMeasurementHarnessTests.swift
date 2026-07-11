@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import XCTest
 @testable import LocalAssistCore
 @testable import LocalAssistEvalKit
@@ -26,6 +27,36 @@ private struct CancellingModelClient: StructuredModelClient {
         AsyncThrowingStream { continuation in
             continuation.finish(throwing: CancellationError())
         }
+    }
+}
+
+/// Warmup succeeds through the requested model, then every measured request
+/// hits a typed model failure and completes through deterministic fallback.
+/// This catches the old bug where those later responses entered model p95s.
+private final class FirstSuccessThenFailureModelClient: StructuredModelClient, Sendable {
+    private let callCount = Mutex(0)
+
+    func availability() async -> ModelAvailability {
+        .available
+    }
+
+    func streamSummary(for request: AssistantRequest) -> AsyncThrowingStream<StructuredSummaryPartial, Error> {
+        let call = callCount.withLock { count in
+            defer { count += 1 }
+            return count
+        }
+        if call == 0 {
+            let complete = StructuredSummaryPartial(
+                overview: "A modeled warmup.",
+                keyPoints: ["Warmup"],
+                suggestions: [],
+                isComplete: true
+            )
+            return StaticStructuredModelClient.completing(with: complete).streamSummary(for: request)
+        }
+        return StaticStructuredModelClient(
+            failure: .guardrailViolation(detail: "scripted")
+        ).streamSummary(for: request)
     }
 }
 
@@ -128,6 +159,31 @@ final class LocalAssistMeasurementHarnessTests: XCTestCase {
         XCTAssertFalse(report.warmupOutcome.isClaimable)
     }
 
+    func testWrongSourceSamplesAfterWarmupNeverEnterModelCohort() async {
+        let service = LocalAssistService(model: FirstSuccessThenFailureModelClient())
+        let report = await DeviceMeasurementHarness.run(
+            configuration: .init(
+                repetitions: 1,
+                useModel: true,
+                interSampleDelay: .zero,
+                fallbackRecoveryDelay: .zero
+            ),
+            worker: await measurementWorker(),
+            service: service
+        )
+
+        XCTAssertEqual(report.warmupOutcome, .succeeded(source: .foundationModels))
+        XCTAssertTrue(report.samples.isEmpty, "fallback responses must not enter model percentiles")
+        XCTAssertEqual(report.unexpectedSourceSamples.count, EvalDataset.standard.count)
+        XCTAssertTrue(report.unexpectedSourceSamples.allSatisfy {
+            $0.source == .deterministicFallback && $0.fallbackCategory == "guardrailViolation"
+        })
+        XCTAssertFalse(report.warmClaimReady)
+        XCTAssertTrue(report.warmClaimBlockingReasons.contains {
+            $0.contains("unexpected source")
+        })
+    }
+
     func testMemoryProfileSamplesContinuously() async {
         let report = await DeviceMeasurementHarness.run(
             configuration: .init(repetitions: 2, useModel: false),
@@ -139,6 +195,10 @@ final class LocalAssistMeasurementHarnessTests: XCTestCase {
         XCTAssertGreaterThan(report.memory.sampleCount, 0, "the monitor sampled during the interval")
     }
 
+}
+
+/// Durable cold-campaign storage and claim-readiness policy tests.
+final class LocalAssistColdLaunchCampaignTests: XCTestCase {
     // MARK: - Campaign store
 
     private func withCleanCampaignStore(_ body: () async throws -> Void) async rethrows {
@@ -156,16 +216,39 @@ final class LocalAssistMeasurementHarnessTests: XCTestCase {
         try await body()
     }
 
-    private func sample(source: GenerationSource) -> DeviceMeasurementHarness.Sample {
+    private func claimEnvironment(
+        commitSHA: String? = "abc1234",
+        thermalState: String = "nominal",
+        lowPowerMode: Bool = false
+    ) -> RunEnvironment {
+        RunEnvironment(
+            deviceModel: "iPhone18,2",
+            osVersion: "Version 26.5.2",
+            buildMode: "debug",
+            commitSHA: commitSHA,
+            thermalState: thermalState,
+            lowPowerMode: lowPowerMode,
+            coldStart: true
+        )
+    }
+
+    private func sample(
+        source: GenerationSource,
+        repetition: Int = 0,
+        environment: RunEnvironment? = nil,
+        fallbackCategory: String? = nil
+    ) -> DeviceMeasurementHarness.Sample {
         DeviceMeasurementHarness.Sample(
             caseID: "blockers-message",
-            repetition: 0,
+            repetition: repetition,
             cohort: .processCold,
             timeToFirstPartialMilliseconds: 812,
             generationCompletedMilliseconds: 1_900,
             actionReviewReadyMilliseconds: 2_050,
             source: source,
-            footprintMB: 182.5
+            fallbackCategory: fallbackCategory,
+            footprintMB: 182.5,
+            environment: environment
         )
     }
 
@@ -173,18 +256,26 @@ final class LocalAssistMeasurementHarnessTests: XCTestCase {
         campaignID: String,
         expected: GenerationSource,
         classification: ColdLaunchCampaignStore.Classification,
-        source: GenerationSource = .foundationModels
+        source: GenerationSource = .foundationModels,
+        repetition: Int = 0,
+        environment: RunEnvironment? = nil
     ) -> ColdLaunchCampaignStore.Record {
-        ColdLaunchCampaignStore.Record(
+        let environment = environment ?? claimEnvironment()
+        return ColdLaunchCampaignStore.Record(
             campaignID: campaignID,
             recordedAt: Date(),
-            environment: .current(coldStart: true),
+            environment: environment,
             expectedSource: expected,
             classification: classification,
-            sample: classification == .failure ? nil : sample(source: source),
+            sample: classification == .failure ? nil : sample(
+                source: source,
+                repetition: repetition,
+                environment: environment,
+                fallbackCategory: source == expected ? nil : "scriptedFallback"
+            ),
             failure: classification == .failure
                 ? DeviceMeasurementHarness.FailedSample(
-                    caseID: "blockers-message", repetition: 0,
+                    caseID: "blockers-message", repetition: repetition,
                     cohort: .processCold, failureCategory: "timedOut"
                 )
                 : nil
@@ -296,6 +387,102 @@ final class LocalAssistMeasurementHarnessTests: XCTestCase {
             )
             XCTAssertEqual(summary.failures.count, 1)
             XCTAssertEqual(summary.failures.first?.failureCategory, "timedOut")
+            XCTAssertFalse(summary.claimReady)
+            XCTAssertTrue(summary.claimBlockingReasons.contains { $0.contains("unexpected source") })
+        }
+    }
+
+    func testClaimReadinessRequiresTwentyCleanThermallyEligibleSamples() async throws {
+        try await withCleanCampaignStore {
+            let environment = self.claimEnvironment()
+            let campaign = try ColdLaunchCampaignStore.begin(
+                expectedSource: .foundationModels,
+                environment: environment
+            )
+            for repetition in 0 ..< MeasurementClaimPolicy.minimumP95SampleCount - 1 {
+                try ColdLaunchCampaignStore.append(self.record(
+                    campaignID: campaign.id,
+                    expected: .foundationModels,
+                    classification: .sample,
+                    repetition: repetition,
+                    environment: environment
+                ))
+            }
+
+            var summary = try XCTUnwrap(ColdLaunchCampaignStore.summaryOfActiveCampaign())
+            XCTAssertFalse(summary.claimReady)
+            XCTAssertTrue(summary.claimBlockingReasons.contains { $0.contains("at least 20") })
+
+            try ColdLaunchCampaignStore.append(self.record(
+                campaignID: campaign.id,
+                expected: .foundationModels,
+                classification: .sample,
+                repetition: MeasurementClaimPolicy.minimumP95SampleCount - 1,
+                environment: environment
+            ))
+            summary = try XCTUnwrap(ColdLaunchCampaignStore.summaryOfActiveCampaign())
+            XCTAssertTrue(summary.claimReady, summary.claimBlockingReasons.joined(separator: ", "))
+            XCTAssertTrue(summary.claimBlockingReasons.isEmpty)
+        }
+    }
+
+    func testClaimPolicyRequiresARealHexCommitSHA() {
+        XCTAssertTrue(MeasurementClaimPolicy.hasTraceableCommit(claimEnvironment(commitSHA: "abc1234")))
+        XCTAssertTrue(MeasurementClaimPolicy.hasTraceableCommit(claimEnvironment(commitSHA: "ABC1234")))
+        XCTAssertFalse(MeasurementClaimPolicy.hasTraceableCommit(claimEnvironment(commitSHA: nil)))
+        XCTAssertFalse(MeasurementClaimPolicy.hasTraceableCommit(claimEnvironment(commitSHA: "unknown")))
+        XCTAssertFalse(MeasurementClaimPolicy.hasTraceableCommit(claimEnvironment(commitSHA: "abc1234-dirty")))
+        XCTAssertFalse(MeasurementClaimPolicy.hasTraceableCommit(claimEnvironment(commitSHA: "abc123")))
+    }
+
+    func testClaimReadinessIndependentlyRejectsMislabeledSources() async throws {
+        try await withCleanCampaignStore {
+            let environment = self.claimEnvironment()
+            let campaign = try ColdLaunchCampaignStore.begin(
+                expectedSource: .foundationModels,
+                environment: environment
+            )
+            for repetition in 0 ..< MeasurementClaimPolicy.minimumP95SampleCount {
+                try ColdLaunchCampaignStore.append(self.record(
+                    campaignID: campaign.id,
+                    expected: .foundationModels,
+                    classification: .sample,
+                    source: .deterministicFallback,
+                    repetition: repetition,
+                    environment: environment
+                ))
+            }
+
+            let summary = try XCTUnwrap(ColdLaunchCampaignStore.summaryOfActiveCampaign())
+            XCTAssertFalse(summary.claimReady)
+            XCTAssertTrue(summary.claimBlockingReasons.contains { $0.contains("mislabeled") })
+        }
+    }
+
+    func testClaimReadinessRejectsDirtyAndThermallyInvalidCampaigns() async throws {
+        try await withCleanCampaignStore {
+            let environment = self.claimEnvironment(
+                commitSHA: "abc1234-dirty",
+                thermalState: "serious"
+            )
+            let campaign = try ColdLaunchCampaignStore.begin(
+                expectedSource: .foundationModels,
+                environment: environment
+            )
+            for repetition in 0 ..< MeasurementClaimPolicy.minimumP95SampleCount {
+                try ColdLaunchCampaignStore.append(self.record(
+                    campaignID: campaign.id,
+                    expected: .foundationModels,
+                    classification: .sample,
+                    repetition: repetition,
+                    environment: environment
+                ))
+            }
+
+            let summary = try XCTUnwrap(ColdLaunchCampaignStore.summaryOfActiveCampaign())
+            XCTAssertFalse(summary.claimReady)
+            XCTAssertTrue(summary.claimBlockingReasons.contains { $0.contains("dirty commit") })
+            XCTAssertTrue(summary.claimBlockingReasons.contains { $0.contains("thermal budget") })
         }
     }
 

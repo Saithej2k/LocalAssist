@@ -83,7 +83,7 @@ The engine details that matter:
 # Full Xcode toolchain required: plain CommandLineTools builds but silently skips XCTest.
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 
-swift test                              # 231 tests
+swift test                              # 236 tests
 swift run localassist-selftest          # 47 end-to-end checks
 swift run localassist-eval --min-score 0.9
 swift run localassist --text "Call Mom tonight, pick up the birthday cake Saturday, and book the dentist for next week." --plain
@@ -103,7 +103,7 @@ Verification is deterministic and CI-gated — no LLM judges, no flaky assertion
 
 | Check | What it covers | Status |
 | --- | --- | --- |
-| `swift test` (231) | Fallback policy (proof every typed `GenerationFailure` falls back with zero further model calls), error taxonomy, typed streaming order, map-reduce chunking, task completion persistence, cancellation (incl. deadline gate side-effect proofs), concurrency, due-date parsing, local-day due-date policy, capture-kind inference, direct-command detection and routing, routed-action reconciliation with rule-ID findings, generated date/time calendar validation, sms handoff encoding, tool calls, executor receipts, conversation memory + 30-turn stress, legacy history decode, WER alignment, ProperNounResolver, voice session timeline, deletion + Spotlight tombstone outbox, redacted diagnostics export, cohort assignment + warmup-outcome gating + cold-campaign envelope, eval scorers | ✅ |
+| `swift test` (236) | Fallback policy (proof every typed `GenerationFailure` falls back with zero further model calls), error taxonomy, typed streaming order, map-reduce chunking, task completion persistence, cancellation (incl. deadline gate side-effect proofs), concurrency, due-date parsing, local-day due-date policy, capture-kind inference, direct-command detection and routing, routed-action reconciliation with rule-ID findings, generated date/time calendar validation, sms handoff encoding, tool calls, executor receipts, conversation memory + 30-turn stress, legacy history decode, WER alignment, ProperNounResolver, voice session timeline, deletion + Spotlight tombstone outbox, redacted diagnostics export, cohort assignment + warmup-outcome gating + cold-campaign envelope, eval scorers | ✅ |
 | `localassist-selftest` (47) | End-to-end scenario checks runnable on any machine | ✅ |
 | `localassist-eval` | Task recall, due-date accuracy, action mapping, structure compliance, hallucination probes over a fixed dataset; dated reports in [docs/evals](docs/evals); CI gates the deterministic path below 0.9, and the live on-device model's committed baseline is 0.89 | ✅ 1.00 (deterministic) |
 | `localassist-bench` | p50–p99 latency, throughput, peak memory, fallback rate, cancellation timing; baselines in [docs/performance](docs/performance) | ✅ |
@@ -111,16 +111,9 @@ Verification is deterministic and CI-gated — no LLM judges, no flaky assertion
 | XCUITest smoke | Real-UI flow on a simulator: offline auto-run produces an action review, all four tabs navigate | ✅ |
 | SwiftLint | Style and correctness lints on every push | ✅ |
 
-Profiling with Xcode Instruments (Time Profiler + Allocations + Points of Interest, `OSSignposter` subsystem `com.saithej.localassist`) drove a refactor that moved generation orchestration, action preparation, and history persistence off the SwiftUI Main Actor. The measured result — full breakdown in the [Instruments summary](docs/profiling/instruments-summary.md), signpost catalog in [docs/instrumentation.md](docs/instrumentation.md):
+The implementation keeps generation orchestration, action preparation, and history persistence outside the SwiftUI Main Actor. `OSSignposter` intervals under `com.saithej.localassist` make those stages inspectable in Time Profiler and Points of Interest, while the debug measurement harness separates warm model samples, wrong-source fallbacks, failures, thermal state, and process-cold launches.
 
-| Scenario | Before | After |
-| --- | ---: | ---: |
-| p50 latency | 860 ms | 610 ms |
-| **p95 latency** | **1,420 ms** | **910 ms** |
-| Peak memory | 184 MB | **171 MB** (under the 185 MB envelope) |
-| Cancellation response | 220 ms | 65 ms |
-
-Both configurations exercise the Smart-brief Foundation Models path end to end; latency is the wall-clock duration of the `Summarize` signpost (Generate tap → completed brief in the review UI), and peak memory is the app-process peak reported by Allocations + VM Tracker. The [Instruments summary](docs/profiling/instruments-summary.md) states the session's provenance in a table — device class, build configuration, N, cohort, saved artifacts — including what the session notes did **not** record, so anyone quoting the numbers quotes the conditions with them. The pinned re-run recipe for a fresh device baseline lives in [docs/performance/live-protocol.md](docs/performance/live-protocol.md); a debug-only measurement harness (Settings → Measurement) runs 160 warm samples of `EvalDataset.standard` alongside a cold-launch campaign envelope (device, OS, build, commit SHA, expected source) so future numbers stay tied to the conditions they were taken under.
+The numerical Instruments resume bullet is **not yet supported**. The earlier `1,420 ms -> 910 ms` and `171 MB` notes lack a saved trace, a pinned commit, a fixed sample set, and enough source-pure runs for a defensible p95. They are retained only as an unverified target in the [Instruments summary](docs/profiling/instruments-summary.md), not as project results. The [live protocol](docs/performance/live-protocol.md) defines the clean physical-device run required before publishing replacement numbers.
 
 ## Package layout
 

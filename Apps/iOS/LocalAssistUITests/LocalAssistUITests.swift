@@ -1,6 +1,6 @@
 import XCTest
 
-/// One smoke test through the real UI: the 43 package tests exercise the
+/// One smoke test through the real UI: the package tests exercise the
 /// engine through view models, but only a UI test catches a broken button
 /// binding, a missing tab, or a view that stopped rendering.
 final class LocalAssistUITests: XCTestCase {
@@ -18,22 +18,39 @@ final class LocalAssistUITests: XCTestCase {
             "the offline pipeline should produce an editable action review"
         )
 
-        app.tabBars.buttons["Today"].tap()
+        XCTAssertTrue(selectTab("Today", in: app), "the Today tab should become selected")
         XCTAssertTrue(
-            app.navigationBars["Today"].waitForExistence(timeout: 5),
+            screen("today-screen", in: app).waitForExistence(timeout: 5),
             "the Today tab should present its screen"
         )
 
-        app.tabBars.buttons["History"].tap()
+        XCTAssertTrue(selectTab("History", in: app), "the History tab should become selected")
         XCTAssertTrue(
-            app.navigationBars["History"].waitForExistence(timeout: 5),
+            screen("history-screen", in: app).waitForExistence(timeout: 5),
             "the History tab should present its screen"
         )
 
-        app.tabBars.buttons["Settings"].tap()
+        XCTAssertTrue(selectTab("Settings", in: app), "the Settings tab should become selected")
         XCTAssertTrue(
-            app.navigationBars["Settings"].waitForExistence(timeout: 5),
+            screen("settings-screen", in: app).waitForExistence(timeout: 5),
             "the Settings tab should present its screen"
         )
+    }
+
+    @MainActor
+    private func selectTab(_ name: String, in app: XCUIApplication) -> Bool {
+        let button = app.tabBars.buttons[name]
+        guard button.waitForExistence(timeout: 5) else {
+            return false
+        }
+        for _ in 0 ..< 2 where !button.isSelected {
+            button.tap()
+        }
+        return button.isSelected
+    }
+
+    @MainActor
+    private func screen(_ identifier: String, in app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any)[identifier]
     }
 }

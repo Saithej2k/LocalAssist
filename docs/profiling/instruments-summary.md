@@ -1,82 +1,87 @@
-# Xcode Instruments Profiling Summary
+# Xcode Instruments Claim Status
 
-The Instruments session behind the résumé bullet:
+## Current status
 
-> Profiled Swift concurrency with Xcode Instruments and moved expensive work off the Main Actor, reducing p95 response latency from 1,420 ms to 910 ms while keeping peak memory usage below 185 MB.
+The numerical Instruments resume bullet is **unsupported**. Do not present
+the values below as measured project results until the evidence gate in this
+document is satisfied.
 
-## Instruments configuration
+The old notes contain this draft target:
 
-- Tool: Xcode Instruments — Time Profiler + Allocations + Points of Interest.
-- Signpost subsystem: `com.saithej.localassist`.
-- Signposts read: `Summarize`, `Validate request`, `Model availability`, `Model response`, `Normalize summary`, `Fallback generation`, `LanguageModelSession.streamResponse`, `Prepare action draft`, `Load run history`, `Save run history`.
-
-The signposts above are still in the source (`Sources/LocalAssistCore/Instrumentation.swift`), and `project.yml` / `LocalAssist.xcodeproj` reproduce the exact target the session profiled.
-
-## Before And After
-
-| Scenario | Before | After |
+| Metric | Before | After |
 | --- | ---: | ---: |
-| p50 latency | 860 ms | 610 ms |
-| p95 latency | 1,420 ms | 910 ms |
-| Peak memory | 184 MB | 171 MB |
+| p50 total latency | 860 ms | 610 ms |
+| p95 total latency | 1,420 ms | 910 ms |
+| Peak app-process memory | 184 MB | 171 MB |
 | Cancellation response | 220 ms | 65 ms |
 
-- **Latency** is the wall-clock duration of the `Summarize` signpost — Generate tap through completed brief usable in the review UI. Not time-to-first-token; not time-to-first-partial.
-- **Peak memory** is app-process peak reported by Allocations + VM Tracker across the Smart-brief pass. Both configurations stayed under the 185 MB envelope.
-- **Cancellation response** is Cancel tap through the last downstream state mutation gated behind `Task.checkCancellation` — measured with the same `OSSignposter` subsystem.
-- **p95** is the 95th percentile of sorted per-run `Summarize` durations, computed with the same formula `MetricDistribution.percentile` uses today (`Sources/LocalAssistCore/PerformanceMetrics.swift`).
+Those values are not claim-ready because the original session did not retain:
 
-## Conditions of this measurement
+- the `.trace` files or screenshots;
+- exact before and after commit SHAs;
+- exact device and iOS build;
+- a fixed, saved input set and context-length distribution;
+- at least 20 source-pure samples for each reported p95;
+- separate cold and warm cohorts;
+- a tagged pre-refactor build.
 
-The Instruments session behind the numbers above ran before the harness and cold-launch campaign in this repo existed. Stated honestly, so anyone quoting these numbers can quote the provenance too:
+Approximately ten mixed warm/cold runs and unsaved inputs cannot support a
+p95 comparison. The values above remain a target for re-measurement, not a
+result to optimize toward or reproduce artificially.
 
-| Aspect | State of the record |
-| --- | --- |
-| Device | Physical iPhone (Foundation Models does not run in the Simulator). Session notes name an iPhone 17 Pro Max — same device the SpeechAnalyzer verification in commit `6d5391f` landed on — but the exact hardware was not written down at profile time. |
-| iOS build | iOS 26.x, same window as the SpeechAnalyzer on-device work (iOS 26.5). Specific build number not recorded. |
-| Xcode | Xcode 26 from `/Applications/Xcode.app/Contents/Developer` — the toolchain CI still pins today. Specific 26.x not recorded. |
-| Build configuration | **Release.** Time Profiler + Allocations were taken with Release optimizations. |
-| Commit SHA | Not recorded. The session predates `EvalDataset.standard`, so the commit is between the pre-eval-kit tree and the post-actor-refactor tree. The individual actor-introduction commits (`LocalAssistWorker`, `RunHistoryStore`, `FoundationModelsSummarizer`) are the load-bearing ones. |
-| Runs per configuration | "Several repeated runs" per session notes — approximately ten per configuration, not the twenty a defensible p95 needs. |
-| Inputs | Notes describe "the mixed brain-dump plus a couple of meeting-note pastes." The style became `EvalDataset.standard` afterwards; the exact strings from the session were not saved. |
-| Identical inputs across before + after | Same session, same handful of inputs in each configuration. Run-by-run identity not journaled. |
-| Warm / cold mix | Warm-dominant. Prewarm existed at the time; the first run of the session was cold, everything after was warm. Not separated into cohorts. |
-| `.trace` files or screenshots | Not preserved. Only this summary and the signposts checked into the source. |
-| A tagged "before" commit | Not tagged. The refactor commits are individually visible in the history; there is no single pre-optimization tag. |
-| Personally run | Yes — I took every measurement in this table. |
+## What is implemented
 
-Everything the next re-measurement needs to answer each of those rows from the page it prints on is now in the tree: `RunMetrics` stamps `environment: RunEnvironment` (device, OS, build mode, commit SHA, thermal, Low Power, cold/warm) on every run, `ProcessGenerationRegistry` grounds `Cohort` assignment, `DeviceMeasurementHarness` performs one unmeasured warmup then collects 160 warm samples, `ColdLaunchCampaignStore` envelopes cold statistics, and the app build stamps `LocalAssistCommitSHA` into `Info.plist` via `project.yml postBuildScripts`. The re-run recipe is `docs/performance/live-protocol.md`; the Instruments protocol is `docs/performance/instruments-protocol.md`.
+- `OSSignposter` intervals under `com.saithej.localassist` cover summarize,
+  validation, availability, model response, normalization, fallback, action
+  preparation, and history IO.
+- `LocalAssistViewModel` owns UI state on `@MainActor`; generation and action
+  preparation run through `LocalAssistWorker`, model work through
+  `FoundationModelsSummarizer`, and persistence through `RunHistoryStore`.
+- The debug device harness records TTFT, generation completion, review-ready
+  latency, source, typed fallback category, cohort, device/build provenance,
+  power, thermal state, and periodic `phys_footprint` observations.
+- Warm and process-cold campaigns reject dirty or missing SHAs, wrong-source
+  fallbacks, failures, incomplete sample counts, thermal pressure, Low Power
+  Mode, and changed pinned environments.
+- The Xcode build stamps `LocalAssistCommitSHA` into the processed product
+  plist. Dirty worktrees receive a `-dirty` suffix and cannot be claim-ready.
 
-## What Changed
+These implementation facts support the architecture story. They do not, by
+themselves, support a numerical performance result.
 
-- Moved generation orchestration, action preparation, and history persistence out of the SwiftUI Main Actor path.
-- Kept `LocalAssistViewModel` isolated to `@MainActor` for UI state only.
-- Added the `LocalAssistWorker` actor for generation/action work.
-- Added `RunHistoryStore` as an actor-backed persistence boundary.
-- Tightened guided JSON decoding so malformed model output falls into deterministic fallback instead of retrying on the UI path.
-- Avoided retaining raw model transcripts after decoding into `StructuredSummary`.
-- Limited saved history to a bounded local retention window.
+## Evidence gate for a replacement claim
 
-## How To Reproduce
+1. Pin a tagged pre-refactor commit and the current clean commit.
+2. Build both in Release with the same Xcode version.
+3. Use the same physical iPhone, iOS build, Apple Intelligence settings, and
+   fixed `EvalDataset.standard` inputs.
+4. Keep Low Power Mode off and accept only nominal/fair thermal samples.
+5. Separate process-cold and warm cohorts. Include only
+   `source == foundationModels`; report fallbacks and failures separately.
+6. Collect at least 20 valid samples for every p95 being quoted. Use 20 per
+   case when reporting per-case p95, or label a 20-launch result aggregate.
+7. Define the latency precisely: TTFT, generation completion, or review-ready
+   total. The old draft intended review-ready total, not TTFT.
+8. Save the exported JSON and the Time Profiler + Points of Interest `.trace`
+   files for both builds.
+9. Save Allocations + VM Tracker traces for the true app-process peak. The
+   in-app 100 ms sampler can miss short spikes and cannot prove `171 MB`.
+10. Publish the actual result, even if it is slower than 910 ms or above
+    185 MB. Then update the resume to the observed values and conditions.
 
-1. Open the package in Xcode 26 or newer.
-2. Run `xcodegen generate` and open `LocalAssist.xcodeproj`.
-3. Select Product > Profile.
-4. Use Time Profiler and add Points of Interest.
-5. Filter for subsystem `com.saithej.localassist`.
-6. Repeat with Allocations enabled.
-7. Exercise:
-   - Foundation Models available path
-   - forced offline fallback path
-   - cancellation while a generation is in flight
-   - several repeated runs to populate history metrics
+Use [the live device protocol](../performance/live-protocol.md) for cohort
+collection and [the Instruments protocol](../performance/instruments-protocol.md)
+for trace capture. A defensible final bullet should name the metric, device,
+cohort, N, fixed input set, and build comparison.
 
-## CLI Baseline
+## CLI baseline is separate
 
-The checked-in CLI benchmark is separate from the Instruments result. It measures the deterministic fallback path for repeatable CI coverage:
+The checked-in CLI benchmark measures the deterministic fallback path for
+repeatable CI coverage:
 
 ```bash
-swift run -c release localassist-bench --iterations 100 --warmup 5 --concurrency 4 --json --output docs/performance/2026-07-02-benchmark.json
+swift run -c release localassist-bench --iterations 100 --warmup 5 --concurrency 4 --json --output docs/performance/<date>-benchmark.json
 ```
 
-That baseline is intentionally much faster than the live Foundation Models path and should not be confused with the resume p95 number.
+It cannot validate Foundation Models latency, Main Actor behavior in the iOS
+app, or iPhone VM Tracker peak memory.

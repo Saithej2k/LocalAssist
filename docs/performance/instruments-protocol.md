@@ -22,6 +22,9 @@ measurement.
 4. Workload: the eight `EvalDataset.standard` inputs, pasted or run via the
    debug measurement harness (Settings → Measurement → Run device
    measurement), 20 repetitions per case — the 160-warm-run floor.
+5. Do not run cold and warm campaigns back-to-back. Let the phone return to
+   nominal first; the harness waits under serious/critical pressure and
+   aborts with `thermalBudgetExceeded` if it cannot recover in two minutes.
 
 ## Cohorts
 
@@ -41,25 +44,30 @@ never come from that run; they come from a **cold-launch campaign**:
 ```bash
 TEST_RUNNER_LOCALASSIST_COMMIT_SHA=$(git rev-parse --short HEAD) \
 TEST_RUNNER_LOCALASSIST_COLD_LAUNCHES=20 \
+TEST_RUNNER_LOCALASSIST_COLD_LAUNCH_PAUSE_SECONDS=30 \
 xcodebuild test \
+  -allowProvisioningUpdates -allowProvisioningDeviceRegistration \
   -project LocalAssist.xcodeproj -scheme LocalAssist \
   -destination 'platform=iOS,name=<your iPhone>' \
   -only-testing:LocalAssistUITests/MeasurementColdLaunchTests
 ```
 
-(`xcodebuild` forwards only `TEST_RUNNER_`-prefixed variables. The app
-build also stamps `LocalAssistCommitSHA` into its Info.plist via a build
-script, so Settings-button runs carry the SHA without any environment.
-**A campaign whose environment has no commit SHA is not claim-ready** —
-its numbers cannot say which code they measured, and the report's
-`claimReady: false` marks them unquotable.)
+(`xcodebuild` forwards only `TEST_RUNNER_`-prefixed variables. The 30-second
+pause is outside every measured interval and lets the model service and
+phone recover between process launches. The app build stamps
+`LocalAssistCommitSHA` into its processed Info.plist after plist generation;
+dirty worktrees receive a `-dirty` suffix. Settings-button runs therefore
+carry provenance without an environment override, while missing/dirty SHAs
+remain unquotable.)
 
 The in-app harness's warm cohort is equally gated: warm samples exist in
 a report only when `warmupOutcome` is `.succeeded` from the
 configuration's expected engine. A warmup that failed, or that answered
 from the deterministic fallback when the run intended to measure
 Foundation Models, aborts the warm cohort — there is no such thing as a
-"warm model sample" the model never produced.
+"warm model sample" the model never produced. A later fallback is preserved
+in `unexpectedSourceSamples`, with its stable `fallbackCategory`, and never
+enters model percentiles.
 
 The first launch resets and begins a campaign — an envelope pinning
 campaign ID, timestamp, device, OS, build configuration, commit SHA, and
@@ -72,6 +80,14 @@ and appends the record durably — fsync before the UI-test completion
 marker appears, so a failed write fails the launch loudly. Failures are
 campaign records too, with their typed category. Reports embed only the
 active campaign's records; different campaigns never fold together.
+
+`claimReady` is deliberately strict. It requires a clean traceable SHA, at
+least 20 expected-source process-cold samples, zero wrong-source or failed
+launches, Low Power Mode off, nominal/fair thermal state for every record,
+and one pinned device/OS/build/SHA across the campaign. The warm report has
+the equivalent `warmClaimReady` plus `warmClaimBlockingReasons`. An
+XCUITest can pass because all records were written while these claim flags
+remain false — operational completion and quotable evidence are different.
 
 **Statistics honesty:** 20 cold launches support an *aggregate* cold p95
 only. For per-case cold percentiles run 20 launches per case

@@ -42,13 +42,13 @@ The final structure keeps UI state on `@MainActor`, routes generation/action wor
 
 ## What Did Instruments Show?
 
-Instruments showed the p95 tail was dominated by work serialized near the UI path: model response handling, guided JSON validation, action draft preparation, and persistence all appeared around the same interaction window. Points of Interest signposts made it clear which phases were taking time.
-
-The fix was to keep the Main Actor responsible for published UI state only and move generation, action preparation, and history IO into async worker/actor boundaries.
+The code is instrumented to separate model response, normalization, action preparation, and history IO, and the architecture keeps those stages outside the Main Actor. However, the original Instruments trace was not preserved, so I would not claim that it proves an exact bottleneck or quote an exact before/after result yet. I would show the actor boundaries and signposts, then use a new saved Time Profiler trace to make the numerical statement.
 
 ## How Did p95 Improve From 1,420 ms To 910 ms?
 
-The p95 reduction came from:
+That exact reduction is still an unverified resume target. The old notes do not pin the commit, inputs, cohort, run count, or trace artifact, so the defensible answer today is: "I implemented the refactor and the measurement harness; I have not yet re-established those numbers under a claim-ready protocol."
+
+The changes expected to improve the path are:
 
 - moving generation orchestration off the Main Actor
 - staging action preparation after summary creation on an async worker
@@ -56,11 +56,11 @@ The p95 reduction came from:
 - bounding retained history
 - measuring and cancelling long-running work explicitly
 
-The Instruments summary is in `docs/profiling/instruments-summary.md`.
+To claim a number, compare a tagged pre-refactor build with the current clean Release build on the same physical iPhone and fixed inputs, collect at least 20 expected-source samples per reported cohort, and preserve the `.trace` files plus exported JSON. The protocol is in `docs/performance/live-protocol.md`.
 
 ## How Did You Keep Memory Below 185 MB?
 
-The app avoids retaining raw transcripts after decoding, stores compact typed summaries, bounds local history retention, and records memory through benchmark/Allocations passes. The Instruments profile kept peak memory under 185 MB; the recorded after value was 171 MB.
+The app avoids retaining raw transcripts after decoding, stores compact typed summaries, and bounds local history retention. But the `171 MB` value is not claim-ready without a saved Allocations plus VM Tracker trace from the pinned build. The in-app 100 ms `phys_footprint` sampler is a screening signal, not proof of the true peak.
 
 ## How Would This Change Across iPhone, Watch, And Vision Pro?
 

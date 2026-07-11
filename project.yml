@@ -59,11 +59,18 @@ targets:
         # source Info.plist stays clean of per-build values.
         script: |
           SHA=$(cd "$SRCROOT" && git rev-parse --short HEAD 2>/dev/null || echo "")
+          if [ -n "$SHA" ] && { ! git -C "$SRCROOT" diff --quiet || ! git -C "$SRCROOT" diff --cached --quiet || [ -n "$(git -C "$SRCROOT" ls-files --others --exclude-standard)" ]; }; then
+            SHA="${SHA}-dirty"
+          fi
           PLIST="${TARGET_BUILD_DIR}/${INFOPLIST_PATH}"
           if [ -n "$SHA" ] && [ -f "$PLIST" ]; then
             /usr/libexec/PlistBuddy -c "Set :LocalAssistCommitSHA $SHA" "$PLIST" 2>/dev/null \
               || /usr/libexec/PlistBuddy -c "Add :LocalAssistCommitSHA string $SHA" "$PLIST"
           fi
+        # Declare the processed plist as an input so Xcode cannot schedule
+        # ProcessInfoPlistFile after this phase and erase the stamp.
+        inputFiles:
+          - $(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)
         basedOnDependencyAnalysis: false
 
   LocalAssistWidgets:

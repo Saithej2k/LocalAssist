@@ -20,7 +20,9 @@ import XCTest
 ///
 ///     TEST_RUNNER_LOCALASSIST_COMMIT_SHA=$(git rev-parse --short HEAD) \
 ///     TEST_RUNNER_LOCALASSIST_COLD_LAUNCHES=20 \
+///     TEST_RUNNER_LOCALASSIST_COLD_LAUNCH_PAUSE_SECONDS=30 \
 ///     xcodebuild test \
+///       -allowProvisioningUpdates -allowProvisioningDeviceRegistration \
 ///       -project LocalAssist.xcodeproj -scheme LocalAssist \
 ///       -destination 'platform=iOS,name=<your iPhone>' \
 ///       -only-testing:LocalAssistUITests/MeasurementColdLaunchTests
@@ -37,6 +39,10 @@ final class MeasurementColdLaunchTests: XCTestCase {
         let environment = ProcessInfo.processInfo.environment
         let requested = Int(environment["LOCALASSIST_COLD_LAUNCHES"] ?? "") ?? 0
         try XCTSkipIf(requested < 1, "set LOCALASSIST_COLD_LAUNCHES to run cold-launch collection")
+        let pauseSeconds = max(
+            0,
+            Double(environment["LOCALASSIST_COLD_LAUNCH_PAUSE_SECONDS"] ?? "") ?? 30
+        )
 
         for launch in 1 ... requested {
             let app = XCUIApplication()
@@ -58,10 +64,13 @@ final class MeasurementColdLaunchTests: XCTestCase {
             app.launch()
 
             XCTAssertTrue(
-                app.otherElements["measurement-cold-done"].waitForExistence(timeout: 180),
+                app.otherElements["measurement-cold-done"].waitForExistence(timeout: 300),
                 "cold launch \(launch)/\(requested) should durably record its sample"
             )
             app.terminate()
+            if launch < requested, pauseSeconds > 0 {
+                Thread.sleep(forTimeInterval: pauseSeconds)
+            }
         }
     }
 }

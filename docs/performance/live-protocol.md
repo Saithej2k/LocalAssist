@@ -1,12 +1,12 @@
 # Live Foundation Models Latency Protocol
 
-The original Instruments comparison — p95 1,420 ms → 910 ms, peak memory
-under 185 MB — is the baseline this project ships against
-(`docs/profiling/instruments-summary.md`). This protocol is the pinned
-re-run recipe for the on-device harness that now surrounds it: every
-new p95 or footprint number lands with device, iOS, run count, and
-cold/warm cohort attached, so the resume line and the JSON on disk say
-the same thing.
+The earlier p95 1,420 ms -> 910 ms and 171 MB notes are an **unverified
+resume target**, not a baseline this project can currently claim. They
+lack a saved trace, pinned commit, fixed input set, and a source-pure
+sample floor. This is the pinned re-run recipe: every replacement p95 or
+footprint number must land with device, iOS, commit, run count, source,
+thermal/power state, and cold/warm cohort attached, so the resume line
+and the JSON on disk say the same thing.
 
 ## Protocol
 
@@ -24,13 +24,19 @@ the same thing.
 5. **Thermal and power state**: log `ProcessInfo` thermal state and Low
    Power Mode per run, the way every voice session already does
    (`thermal=`, `lowPower=`). Discard runs above thermal state 1 or note
-   them explicitly.
+   them explicitly. The automated harness blocks new work under
+   serious/critical pressure; claim readiness still checks every completed
+   sample in case the state changed during generation.
 6. **Collection**: on-device runs land in `RunHistoryStore` with per-run
    `durationMilliseconds` and `source`; Settings → Export history (JSON)
    carries them off the phone. `AggregateRunMetrics` computes the p50/p95
    split by source. No hand-copied numbers.
 7. **Report**: date-stamped markdown in `docs/performance`, same shape as
    the CLI baselines, with the device header from step 1.
+8. **Source integrity**: model percentiles include only samples whose source
+   is `foundationModels`. Wrong-source completions and failures are reported
+   separately with typed categories; a mixed cohort is never silently
+   relabeled as model latency.
 
 ## What exists today
 

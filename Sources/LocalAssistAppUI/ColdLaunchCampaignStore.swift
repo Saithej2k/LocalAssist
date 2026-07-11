@@ -27,12 +27,11 @@
             /// other source is classified `unexpectedSource`.
             public var expectedSource: GenerationSource
 
-            /// A campaign without a commit SHA cannot say which code it
-            /// measured — its numbers stay unclaimed. The app stamps
-            /// `LocalAssistCommitSHA` into device builds; XCUITest launches
-            /// forward `LOCALASSIST_COMMIT_SHA` per the documented command.
-            public var isClaimReady: Bool {
-                environment.commitSHA?.isEmpty == false
+            /// Provenance is necessary but not sufficient for a claim. The
+            /// summary also checks count, source, failures, power, thermal
+            /// state, and environment consistency across every record.
+            public var hasTraceableProvenance: Bool {
+                MeasurementClaimPolicy.hasTraceableCommit(environment)
             }
         }
 
@@ -63,10 +62,10 @@
             public var samples: [DeviceMeasurementHarness.Sample]
             public var unexpectedSourceSamples: [DeviceMeasurementHarness.Sample]
             public var failures: [DeviceMeasurementHarness.FailedSample]
-            /// False when the campaign lacks a commit SHA — the samples
-            /// are preserved but must not be quoted as measurements of any
-            /// particular build.
+            /// True only when every requirement for an aggregate p95 claim
+            /// is satisfied. Operational test success alone is not enough.
             public var claimReady: Bool
+            public var claimBlockingReasons: [String]
         }
 
         public enum CampaignError: Error, Equatable {
@@ -198,14 +197,117 @@
                 return nil
             }
             let all = records(for: campaign)
+            let samples = all.filter { $0.classification == .sample }.compactMap(\.sample)
+            let unexpectedSourceSamples = all.filter { $0.classification == .unexpectedSource }
+                .compactMap(\.sample)
+            let failures = all.filter { $0.classification == .failure }.compactMap(\.failure)
+            let blockers = claimBlockers(ClaimEvidence(
+                campaign: campaign,
+                records: all,
+                samples: samples,
+                unexpectedSourceSamples: unexpectedSourceSamples,
+                failures: failures
+            ))
             return Summary(
                 campaign: campaign,
-                samples: all.filter { $0.classification == .sample }.compactMap(\.sample),
-                unexpectedSourceSamples: all.filter { $0.classification == .unexpectedSource }
-                    .compactMap(\.sample),
-                failures: all.filter { $0.classification == .failure }.compactMap(\.failure),
-                claimReady: campaign.isClaimReady
+                samples: samples,
+                unexpectedSourceSamples: unexpectedSourceSamples,
+                failures: failures,
+                claimReady: blockers.isEmpty,
+                claimBlockingReasons: blockers
             )
+        }
+
+        private struct ClaimEvidence {
+            var campaign: Campaign
+            var records: [Record]
+            var samples: [DeviceMeasurementHarness.Sample]
+            var unexpectedSourceSamples: [DeviceMeasurementHarness.Sample]
+            var failures: [DeviceMeasurementHarness.FailedSample]
+        }
+
+        private static func claimBlockers(_ evidence: ClaimEvidence) -> [String] {
+            provenanceBlockers(evidence)
+                + recordIntegrityBlockers(evidence)
+                + environmentBlockers(evidence)
+        }
+
+        private static func provenanceBlockers(_ evidence: ClaimEvidence) -> [String] {
+            var blockers: [String] = []
+            if !evidence.campaign.hasTraceableProvenance {
+                blockers.append("missing or dirty commit SHA")
+            }
+            if !MeasurementClaimPolicy.hasStablePower(evidence.campaign.environment) {
+                blockers.append("Low Power Mode was enabled")
+            }
+            if evidence.samples.count < MeasurementClaimPolicy.minimumP95SampleCount {
+                blockers.append(
+                    "expected at least \(MeasurementClaimPolicy.minimumP95SampleCount) "
+                        + "expected-source process-cold samples, recorded \(evidence.samples.count)"
+                )
+            }
+            if !evidence.unexpectedSourceSamples.isEmpty {
+                blockers.append(
+                    "\(evidence.unexpectedSourceSamples.count) cold samples used an unexpected source"
+                )
+            }
+            if !evidence.failures.isEmpty {
+                blockers.append("\(evidence.failures.count) cold launches failed")
+            }
+            return blockers
+        }
+
+        private static func recordIntegrityBlockers(_ evidence: ClaimEvidence) -> [String] {
+            var blockers: [String] = []
+            let malformedRecordCount = evidence.records.filter { record in
+                switch record.classification {
+                case .sample, .unexpectedSource:
+                    record.sample == nil || record.failure != nil
+                case .failure:
+                    record.sample != nil || record.failure == nil
+                }
+            }.count
+            if malformedRecordCount > 0 {
+                blockers.append("\(malformedRecordCount) cold records were malformed")
+            }
+            let mislabeledSourceCount = evidence.samples.filter {
+                $0.source != evidence.campaign.expectedSource
+            }.count
+            if mislabeledSourceCount > 0 {
+                blockers.append("\(mislabeledSourceCount) expected-source samples were mislabeled")
+            }
+            let wrongCohortCount = evidence.records.compactMap(\.sample)
+                .filter { $0.cohort != .processCold }.count
+            if wrongCohortCount > 0 {
+                blockers.append("\(wrongCohortCount) cold samples were not process-cold")
+            }
+            let wrongExpectedSourceCount = evidence.records.filter {
+                $0.expectedSource != evidence.campaign.expectedSource
+            }.count
+            if wrongExpectedSourceCount > 0 {
+                blockers.append("\(wrongExpectedSourceCount) records changed expected source")
+            }
+            return blockers
+        }
+
+        private static func environmentBlockers(_ evidence: ClaimEvidence) -> [String] {
+            var blockers: [String] = []
+            let inconsistentEnvironmentCount = evidence.records.filter {
+                !MeasurementClaimPolicy.matchesPinnedEnvironment(
+                    $0.environment,
+                    campaign: evidence.campaign.environment
+                )
+            }.count
+            if inconsistentEnvironmentCount > 0 {
+                blockers.append("\(inconsistentEnvironmentCount) records changed pinned environment")
+            }
+            let thermallyInvalidCount = evidence.records.filter {
+                !MeasurementClaimPolicy.isThermallyEligible($0.environment)
+            }.count
+            if thermallyInvalidCount > 0 {
+                blockers.append("\(thermallyInvalidCount) cold samples exceeded the thermal budget")
+            }
+            return blockers
         }
     }
 #endif

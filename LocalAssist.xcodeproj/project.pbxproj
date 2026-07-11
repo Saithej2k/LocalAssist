@@ -372,6 +372,7 @@
 			inputFileListPaths = (
 			);
 			inputPaths = (
+				"$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)",
 			);
 			name = "Stamp commit SHA";
 			outputFileListPaths = (
@@ -380,7 +381,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "SHA=$(cd \"$SRCROOT\" && git rev-parse --short HEAD 2>/dev/null || echo \"\")\nPLIST=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\nif [ -n \"$SHA\" ] && [ -f \"$PLIST\" ]; then\n  /usr/libexec/PlistBuddy -c \"Set :LocalAssistCommitSHA $SHA\" \"$PLIST\" 2>/dev/null \\\n    || /usr/libexec/PlistBuddy -c \"Add :LocalAssistCommitSHA string $SHA\" \"$PLIST\"\nfi\n";
+			shellScript = "SHA=$(cd \"$SRCROOT\" && git rev-parse --short HEAD 2>/dev/null || echo \"\")\nif [ -n \"$SHA\" ] && { ! git -C \"$SRCROOT\" diff --quiet || ! git -C \"$SRCROOT\" diff --cached --quiet || [ -n \"$(git -C \"$SRCROOT\" ls-files --others --exclude-standard)\" ]; }; then\n  SHA=\"${SHA}-dirty\"\nfi\nPLIST=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\nif [ -n \"$SHA\" ] && [ -f \"$PLIST\" ]; then\n  /usr/libexec/PlistBuddy -c \"Set :LocalAssistCommitSHA $SHA\" \"$PLIST\" 2>/dev/null \\\n    || /usr/libexec/PlistBuddy -c \"Add :LocalAssistCommitSHA string $SHA\" \"$PLIST\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

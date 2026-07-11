@@ -5,6 +5,20 @@ All notable changes to LocalAssist are documented here.
 ## Unreleased
 
 ### Measurement rigor (2026-07-11, follow-up)
+- A real iPhone campaign exposed the difference between durable collection
+  and quotable evidence: 20 launches can all write successfully while model
+  fallbacks and thermal pressure invalidate the cohort. `claimReady` and
+  `warmClaimReady` now require a clean stamped commit, the full sample floor,
+  expected source, stable power, nominal/fair thermal state, and one pinned
+  environment. Every blocker is exported explicitly.
+- Warm runs now partition later fallback completions into
+  `unexpectedSourceSamples` with stable failure categories instead of
+  admitting them to model percentiles. Live runs wait under thermal pressure,
+  recover longer after fallback, and cold XCUITest launches have a configurable
+  30-second recovery interval.
+- Commit stamping now depends on Xcode's processed Info.plist so plist
+  generation cannot erase it; uncommitted builds are stamped `-dirty` and are
+  deliberately unquotable.
 - Cohorts are now facts, not labels: `processCold` (no generation had
   started in the process, per a process-wide generation registry),
   `sessionCold` (fresh service, warm process), `warm`. The in-app

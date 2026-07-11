@@ -177,6 +177,7 @@ public struct LocalAssistHomeView: View {
     private var settingsTab: some View {
         NavigationStack {
             SettingsFormView(viewModel: viewModel)
+                .accessibilityIdentifier("settings-screen")
                 .navigationTitle("Settings")
         }
     }
@@ -196,6 +197,7 @@ public struct LocalAssistHomeView: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 18)
             }
+            .accessibilityIdentifier("today-screen")
             .background(LocalAssistColors.canvas)
             .navigationTitle("Today")
         }
@@ -221,6 +223,7 @@ public struct LocalAssistHomeView: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 18)
             }
+            .accessibilityIdentifier("history-screen")
             .background(LocalAssistColors.canvas)
             .navigationTitle("History")
         }

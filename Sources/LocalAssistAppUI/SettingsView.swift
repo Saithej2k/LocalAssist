@@ -173,7 +173,9 @@ struct SettingsFormView: View {
                     Text(
                         "One unmeasured warmup, then the eval dataset 20× per case through "
                             + "the real pipeline — 160 warm samples, plus the active cold-launch "
-                            + "campaign and 100 ms periodic footprint sampling, exported as JSON. "
+                            + "campaign and 100 ms periodic footprint sampling. Live runs pause "
+                            + "under thermal pressure; wrong-source samples remain separate. "
+                            + "Everything exports as JSON. "
                             + "Not present in release builds."
                     )
                 }
