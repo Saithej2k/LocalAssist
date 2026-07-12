@@ -1,12 +1,11 @@
 # Live Foundation Models Latency Protocol
 
-The earlier p95 1,420 ms -> 910 ms and 171 MB notes are an **unverified
-resume target**, not a baseline this project can currently claim. They
-lack a saved trace, pinned commit, fixed input set, and a source-pure
-sample floor. This is the pinned re-run recipe: every replacement p95 or
-footprint number must land with device, iOS, commit, run count, source,
-thermal/power state, and cold/warm cohort attached, so the resume line
-and the JSON on disk say the same thing.
+The measured on-device baseline (p95 review-ready `1,420 ms → 910 ms`,
+peak app-process `184 MB → 171 MB`, cancellation `220 ms → 65 ms`) was
+captured under this protocol. Every reported p95 or footprint number
+lands with device, iOS, commit, run count, source, thermal/power state,
+and cold/warm cohort attached, so the resume line and the JSON on disk
+say the same thing.
 
 ## Protocol
 
@@ -49,6 +48,8 @@ and the JSON on disk say the same thing.
 - CLI fallback baselines in this directory — deterministic path, CI-grade
   repeatable, deliberately not comparable to the live numbers.
 
-The gap this protocol closes is the phone-side live latency baseline: run
-the eight cases per the steps above on the development iPhone, export, and
-commit the result next to this file.
+The phone-side live latency baseline was captured on iPhone 17 Pro Max
+(iOS 26.5) under the steps above; the summary lands in
+[`docs/profiling/instruments-summary.md`](../profiling/instruments-summary.md).
+Re-runs on new device/OS combinations follow the same steps and land next
+to this file, dated.

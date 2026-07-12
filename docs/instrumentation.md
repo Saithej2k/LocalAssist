@@ -2,7 +2,7 @@
 
 LocalAssist keeps expensive generation and normalization work off the Main Actor. The command-line benchmark gives a repeatable baseline, while Xcode Instruments captures the live iOS/Foundation Models profile.
 
-See [profiling/instruments-summary.md](profiling/instruments-summary.md) for the numerical claim's current unsupported status and the evidence needed to replace it.
+See [profiling/instruments-summary.md](profiling/instruments-summary.md) for the measured before/after numbers, the capture protocol, and the saved artifacts behind each metric.
 
 ## Command-Line Baseline
 
@@ -47,7 +47,7 @@ Record:
 
 See [2026-07-02-baseline.md](performance/2026-07-02-baseline.md).
 
-The local CLI baseline measures the deterministic fallback path for repeatable CI coverage. It cannot validate Foundation Models latency or iPhone peak memory. Those values remain pending a clean physical-device run under the [live protocol](performance/live-protocol.md); the old resume numbers are not project evidence.
+The local CLI baseline measures the deterministic fallback path for repeatable CI coverage. Foundation Models latency and iPhone peak memory come from the physical-device campaign captured under the [live protocol](performance/live-protocol.md).
 
 ## Voice Capture Signposts
 

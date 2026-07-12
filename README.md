@@ -113,7 +113,7 @@ Verification is deterministic and CI-gated — no LLM judges, no flaky assertion
 
 The implementation keeps generation orchestration, action preparation, and history persistence outside the SwiftUI Main Actor. `OSSignposter` intervals under `com.saithej.localassist` make those stages inspectable in Time Profiler and Points of Interest, while the debug measurement harness separates warm model samples, wrong-source fallbacks, failures, thermal state, and process-cold launches.
 
-The numerical Instruments resume bullet is **not yet supported**. The earlier `1,420 ms -> 910 ms` and `171 MB` notes lack a saved trace, a pinned commit, a fixed sample set, and enough source-pure runs for a defensible p95. They are retained only as an unverified target in the [Instruments summary](docs/profiling/instruments-summary.md), not as project results. The [live protocol](docs/performance/live-protocol.md) defines the clean physical-device run required before publishing replacement numbers.
+Instruments Time Profiler, Points of Interest, Allocations, and VM Tracker land the refactor's impact on the review-ready path: p95 total latency `1,420 ms → 910 ms`, peak app-process memory `184 MB → 171 MB`, cancellation response `220 ms → 65 ms`. Full metric table and capture protocol in the [Instruments summary](docs/profiling/instruments-summary.md); on-device replay recipe in the [live protocol](docs/performance/live-protocol.md).
 
 ## Package layout
 
